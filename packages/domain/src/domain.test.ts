@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DomainSession } from './history.js';
+import { planSubsystemRemoval } from './deletion.js';
 import { createEmptyProject, createEntityId, PRODUCT_NAME, type Subsystem } from './model.js';
 import { validateModel } from './validation.js';
 
@@ -49,6 +50,110 @@ describe('domain model', () => {
     expect(session.model.subsystems).toHaveLength(0);
     session.redo();
     expect(session.model.subsystems).toHaveLength(1);
+  });
+
+  it('plans a valid cascading subsystem hierarchy removal', () => {
+    const base = fixture();
+    const rootId = createEntityId();
+    const childId = createEntityId();
+    const deviceId = createEntityId();
+    const commandId = createEntityId();
+    const bindingId = createEntityId();
+    const autoId = createEntityId();
+    const survivorId = createEntityId();
+    const controllerId = createEntityId();
+    const model = {
+      ...base,
+      autos: [
+        {
+          commandId,
+          displayName: 'Score auto',
+          id: autoId,
+          pathFiles: [],
+          symbol: 'ScoreAuto',
+        },
+      ],
+      bindings: [
+        {
+          behavior: 'onTrue' as const,
+          commandId,
+          controllerId,
+          id: bindingId,
+          input: 'a',
+        },
+      ],
+      commands: [
+        {
+          displayName: 'Move arm',
+          id: commandId,
+          kind: 'run' as const,
+          requirementIds: [rootId],
+          symbol: 'moveArm',
+        },
+      ],
+      controllers: [
+        {
+          displayName: 'Driver',
+          id: controllerId,
+          port: 0,
+          provider: 'CommandXboxController',
+          role: 'driver' as const,
+          symbol: 'driver',
+        },
+      ],
+      devices: [
+        {
+          displayName: 'Arm motor',
+          id: deviceId,
+          kind: 'motor' as const,
+          model: 'TalonFX',
+          parameters: [],
+          parentId: childId,
+          symbol: 'armMotor',
+          vendor: 'CTRE',
+        },
+      ],
+      subsystems: [
+        { displayName: 'Arm', id: rootId, kind: 'subsystem' as const, symbol: 'Arm' },
+        {
+          displayName: 'Pivot',
+          id: childId,
+          kind: 'mechanism' as const,
+          parentId: rootId,
+          symbol: 'Pivot',
+        },
+        {
+          dependencies: [{ fieldName: 'arm', targetSubsystemId: rootId }],
+          displayName: 'Survivor',
+          id: survivorId,
+          kind: 'subsystem' as const,
+          stateMachine: {
+            states: [
+              {
+                actions: [{ commandId, targetId: deviceId }],
+                displayName: 'Idle',
+                id: createEntityId(),
+                initial: true,
+                symbol: 'Idle',
+              },
+            ],
+            transitions: [],
+          },
+          symbol: 'Survivor',
+        },
+      ],
+    };
+
+    const plan = planSubsystemRemoval(model, rootId);
+    expect(plan.removedSubsystemIds).toEqual(expect.arrayContaining([rootId, childId]));
+    expect(plan.removedDeviceIds).toContain(deviceId);
+    expect(plan.removedCommandIds).toContain(commandId);
+    expect(plan.removedBindingIds).toContain(bindingId);
+    expect(plan.removedAutoIds).toContain(autoId);
+    expect(plan.model.subsystems).toHaveLength(1);
+    expect(plan.model.subsystems[0]?.dependencies).toEqual([]);
+    expect(plan.model.subsystems[0]?.stateMachine?.states[0]?.actions).toEqual([]);
+    expect(validateModel(plan.model).filter((problem) => problem.severity === 'error')).toEqual([]);
   });
 
   it('reports duplicate CAN addresses and broken references with entity paths', () => {

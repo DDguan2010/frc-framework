@@ -660,6 +660,8 @@
 - [x] **CONT-085 P0** 应用内与安装包图标使用同一透明 SVG 资源。
 - [x] **CONT-086 P0** 添加单版本输入的 Windows/macOS/Linux 自动构建与 GitHub Release workflow。
 - [x] **CONT-087 P0** 移除 commit hooks，普通 Git 提交不隐式运行项目检查。
+- [x] **CONT-088 P0** 允许未修改的全文件预制 Java 参与后续结构化操作，同时保留真实外部修改冲突保护。
+- [x] **CONT-089 P0** Subsystem 删除支持层级、设备、Command、Binding、Auto 与生成文件的影响预览和级联清理。
 
 ## 14. 首批开发迭代建议
 

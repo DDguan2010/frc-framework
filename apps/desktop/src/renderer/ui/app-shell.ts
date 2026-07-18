@@ -2,6 +2,7 @@ import { I18n, resolveLocale, type TranslationKey } from '@frc-framework/i18n';
 import {
   createEntityId,
   javaSymbol,
+  planSubsystemRemoval,
   validateModel,
   type AppInfo,
   type Device,
@@ -838,6 +839,7 @@ export class AppShell extends LitElement {
   @state() private docSupplement = '';
   @state() private deleteImpact:
     | {
+        readonly command: DomainCommand;
         readonly id: string;
         readonly label: string;
         readonly references: readonly string[];
@@ -4855,10 +4857,81 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   private readonly prepareDeleteSelected = (): void => {
     const model = this.model();
     const device = model?.devices.find((entry) => entry.id === this.selectedEntityId);
-    if (model === undefined || device === undefined) {
+    const subsystem = model?.subsystems.find((entry) => entry.id === this.selectedEntityId);
+    if (model === undefined || (device === undefined && subsystem === undefined)) {
       this.notice = this.#i18n.t('tree.deleteDeviceOnly');
       return;
     }
+    if (subsystem !== undefined) {
+      const plan = planSubsystemRemoval(model, subsystem.id);
+      const removedSubsystemIds = new Set(plan.removedSubsystemIds);
+      const removedDeviceIds = new Set(plan.removedDeviceIds);
+      const removedCommandIds = new Set(plan.removedCommandIds);
+      const removedBindingIds = new Set(plan.removedBindingIds);
+      const removedAutoIds = new Set(plan.removedAutoIds);
+      const removedPresetIds = new Set(plan.removedPresetIds);
+      let root = subsystem;
+      while (root.parentId !== undefined) {
+        const parent = model.subsystems.find((entry) => entry.id === root.parentId);
+        if (parent === undefined) break;
+        root = parent;
+      }
+      const javaFile =
+        root.javaFile ??
+        `src/main/java/${(root.javaPackage ?? `${model.project.javaPackage}.subsystems.${lowerFirst(root.symbol)}`).replace(/\./gu, '/')}/${root.symbol}.java`;
+      this.deleteImpact = {
+        command: {
+          changes: {
+            autos: plan.model.autos,
+            bindings: plan.model.bindings,
+            commands: plan.model.commands,
+            devices: plan.model.devices,
+            presets: plan.model.presets,
+            subsystems: plan.model.subsystems,
+          },
+          target: { scope: 'model' },
+          type: 'update',
+        },
+        files: [
+          'project.yaml',
+          javaFile,
+          'src/main/java/**/RobotContainer.java',
+          'src/main/java/**/commands/RobotCommands.java',
+          'docs/HARDWARE_MAP.md',
+          'docs/SUBSYSTEMS.md',
+          'docs/STATE_MODEL.md',
+        ],
+        id: subsystem.id,
+        label: subsystem.displayName,
+        references: [
+          ...model.subsystems
+            .filter((entry) => entry.id !== subsystem.id && removedSubsystemIds.has(entry.id))
+            .map((entry) =>
+              this.#i18n.t('tree.impactSubsystem').replace('{name}', entry.displayName),
+            ),
+          ...model.devices
+            .filter((entry) => removedDeviceIds.has(entry.id))
+            .map((entry) => this.#i18n.t('tree.impactDevice').replace('{name}', entry.displayName)),
+          ...model.commands
+            .filter((entry) => removedCommandIds.has(entry.id))
+            .map((entry) =>
+              this.#i18n.t('tree.impactCommand').replace('{name}', entry.displayName),
+            ),
+          ...model.bindings
+            .filter((entry) => removedBindingIds.has(entry.id))
+            .map((entry) => this.#i18n.t('tree.impactBinding').replace('{name}', entry.input)),
+          ...model.autos
+            .filter((entry) => removedAutoIds.has(entry.id))
+            .map((entry) => this.#i18n.t('tree.impactAuto').replace('{name}', entry.displayName)),
+          ...model.presets
+            .filter((entry) => removedPresetIds.has(entry.id))
+            .map((entry) => this.#i18n.t('tree.impactPreset').replace('{name}', entry.displayName)),
+        ],
+      };
+      this.dialog('delete-impact-dialog')?.show();
+      return;
+    }
+    if (device === undefined) return;
     const references: string[] = [];
     for (const candidate of model.devices) {
       if (candidate.id === device.id) continue;
@@ -4886,6 +4959,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
         : (root.javaFile ??
           `src/main/java/${(root.javaPackage ?? `${model.project.javaPackage}.subsystems.${lowerFirst(root.symbol)}`).replace(/\./gu, '/')}/${root.symbol}.java`);
     this.deleteImpact = {
+      command: { collection: 'devices', id: device.id, type: 'remove' },
       files: ['project.yaml', javaFile, 'docs/HARDWARE_MAP.md', 'docs/TUNING.md'],
       id: device.id,
       label: device.displayName,
@@ -4898,7 +4972,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     const impact = this.deleteImpact;
     if (impact === undefined) return;
     this.dialog('delete-impact-dialog')?.close();
-    await this.previewCommand({ collection: 'devices', id: impact.id, type: 'remove' });
+    await this.previewCommand(impact.command);
     this.deleteImpact = undefined;
   };
 

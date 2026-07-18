@@ -556,6 +556,18 @@ export class ProjectService {
               : content,
       );
     }
+    const previousModel = this.#session?.model;
+    if (previousModel !== undefined) {
+      for (const filePath of generateStructuredFiles(previousModel).keys()) {
+        if (
+          !generated.has(filePath) &&
+          !model.unmanagedFiles.includes(filePath) &&
+          !previousModel.unmanagedFiles.includes(filePath)
+        ) {
+          generated.set(filePath, null);
+        }
+      }
+    }
     return generated;
   }
 

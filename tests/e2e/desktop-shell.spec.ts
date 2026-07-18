@@ -418,6 +418,27 @@ test('production shell is secure, accessible, and interactive', async () => {
       ),
     ).toBe(false);
 
+    await rollerSubsystem.evaluate((element) =>
+      element.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, button: 2, composed: true }),
+      ),
+    );
+    await clickMaterialButton(
+      page,
+      page.locator('#tree-actions-menu md-menu-item').filter({ hasText: i18n.t('tree.delete') }),
+    );
+    const deleteDialog = page.getByRole('dialog', { name: i18n.t('tree.deleteTitle') });
+    await expect(deleteDialog).toBeVisible();
+    await expect(page.locator('#delete-impact-dialog')).toContainText('Roller Motor');
+    await clickMaterialButton(page, page.locator('#delete-impact-dialog md-filled-button'));
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: i18n.t('diff.apply') }).click();
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeHidden({
+      timeout: 60_000,
+    });
+    await waitForExternalSync(page);
+    await expect(rollerSubsystem).toBeHidden();
+
     await clickMaterialButton(
       page,
       page

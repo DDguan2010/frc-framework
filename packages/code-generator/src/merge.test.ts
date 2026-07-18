@@ -49,4 +49,18 @@ public final class Example {
       ),
     ).toThrow('conflict');
   });
+
+  it('accepts an unchanged fully generated preset implementation without managed regions', () => {
+    const generated = 'package frc.robot.subsystems.swerve;\nfinal class SwerveConfig {}\n';
+    expect(mergeGeneratedJava(generated, generated)).toBe(generated);
+  });
+
+  it('still refuses to overwrite a modified fully generated preset implementation', () => {
+    expect(() =>
+      mergeGeneratedJava(
+        'package frc.robot.subsystems.swerve;\nfinal class TeamEditedSwerveConfig {}\n',
+        'package frc.robot.subsystems.swerve;\nfinal class SwerveConfig {}\n',
+      ),
+    ).toThrow('conflict');
+  });
 });

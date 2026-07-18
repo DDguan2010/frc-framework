@@ -9,6 +9,12 @@ export function mergeGeneratedJava(existing: string | undefined, generated: stri
   if (existing === undefined) return generated;
   const generatedBlocks = [...generated.matchAll(managedBlock)];
   const existingBlocks = [...existing.matchAll(managedBlock)];
+  // Some preset implementations are generated as complete Java files rather
+  // than mixed managed/custom regions. An unchanged file is already the exact
+  // candidate we want and must not block unrelated structured edits.
+  if (generatedBlocks.length === 0 && existingBlocks.length === 0 && existing === generated) {
+    return existing;
+  }
   if (generatedBlocks.length === 0 || existingBlocks.length !== generatedBlocks.length) {
     throw new Error(
       'Managed Java layout changed; explicit code/model conflict resolution is required.',

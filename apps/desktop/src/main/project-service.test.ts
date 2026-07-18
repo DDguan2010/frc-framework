@@ -2,7 +2,9 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createEmptyProject, createEntityId } from '@frc-framework/domain';
+import { generateStructuredFiles } from '@frc-framework/code-generator';
+import { createEmptyProject, createEntityId, planSubsystemRemoval } from '@frc-framework/domain';
+import { instantiateCommonPreset, instantiateSwervePreset } from '@frc-framework/presets';
 import { stringifyProjectYaml } from '@frc-framework/project-io';
 import { describe, expect, it } from 'vitest';
 
@@ -10,6 +12,107 @@ import { ProjectService } from './project-service.js';
 import { SettingsStore } from './settings-store.js';
 
 describe('ProjectService structured edits', () => {
+  it('keeps structured edits working when unchanged full-file preset Java already exists', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-service-preset-'));
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-preset-state-'));
+    const base = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'Preset Robot',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    const swerve = instantiateSwervePreset(base, {
+      canBus: 'rio',
+      driveIds: [1, 2, 3, 4],
+      driveRatio: 6.75,
+      encoderIds: [9, 10, 11, 12],
+      encoderOffsets: [0, 0, 0, 0],
+      gyroId: 13,
+      maxSpeed: 4.5,
+      steerIds: [5, 6, 7, 8],
+      steerRatio: 12.8,
+      trackwidth: 0.55,
+      wheelRadius: 0.05,
+      wheelbase: 0.55,
+    });
+    await writeStructuredFixture(root, swerve);
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      await service.open(root);
+      const position = instantiateCommonPreset(swerve, 'frc.position-mechanism', {
+        canBus: 'rio',
+        canId: 20,
+        name: 'Arm',
+        setpoints: ['HOME=0', 'ACTIVE=1'],
+        setpointUnit: 'rot',
+      });
+      const preview = await service.previewCommand({
+        changes: {
+          devices: position.devices,
+          presets: position.presets,
+          subsystems: position.subsystems,
+        },
+        target: { scope: 'model' },
+        type: 'update',
+      });
+      expect(preview.problems).toEqual([]);
+      expect(preview.changes.some((change) => change.path.endsWith('/Arm.java'))).toBe(true);
+      await service.discardPreview(preview.id);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('previews deletion of Java that belongs to a removed subsystem root', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-service-delete-'));
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-delete-state-'));
+    const subsystemId = createEntityId();
+    const base = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'Delete Robot',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    const model = {
+      ...base,
+      subsystems: [
+        { displayName: 'Arm', id: subsystemId, kind: 'subsystem' as const, symbol: 'Arm' },
+      ],
+    };
+    await writeStructuredFixture(root, model);
+    const javaPath = 'src/main/java/frc/robot/subsystems/arm/Arm.java';
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      await service.open(root);
+      const plan = planSubsystemRemoval(model, subsystemId);
+      const preview = await service.previewCommand({
+        changes: {
+          autos: plan.model.autos,
+          bindings: plan.model.bindings,
+          commands: plan.model.commands,
+          devices: plan.model.devices,
+          presets: plan.model.presets,
+          subsystems: plan.model.subsystems,
+        },
+        target: { scope: 'model' },
+        type: 'update',
+      });
+      expect(preview.changes).toContainEqual(
+        expect.objectContaining({ kind: 'deleted', path: javaPath }),
+      );
+      await service.applyPreview(preview.id);
+      await expect(readFile(path.join(root, javaPath), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      await service.close();
+    }
+  });
+
   it('previews legacy schema migration and creates a backup only after confirmation', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-service-migration-'));
     const model = createEmptyProject({
@@ -391,3 +494,15 @@ describe('ProjectService structured edits', () => {
     }
   });
 });
+
+async function writeStructuredFixture(
+  root: string,
+  model: ReturnType<typeof createEmptyProject>,
+): Promise<void> {
+  await writeFile(path.join(root, 'project.yaml'), stringifyProjectYaml(model), 'utf8');
+  for (const [relativePath, content] of generateStructuredFiles(model)) {
+    const outputPath = path.join(root, relativePath);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, content);
+  }
+}
