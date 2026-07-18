@@ -18,7 +18,7 @@ import {
 import { runGradle } from '@frc-framework/toolchain';
 import { describe, expect, it } from 'vitest';
 
-import { generateProject } from './generator.js';
+import { generateProject, renderText, templateContext } from './generator.js';
 import { createProject } from './project-creator.js';
 
 function projectModel() {
@@ -113,6 +113,15 @@ function shooterFixture() {
 }
 
 describe('deterministic project generator', () => {
+  it('normalizes template line endings across Windows, macOS, and Linux', () => {
+    const context = templateContext(projectModel());
+    const lf = 'name={{PROJECT_NAME}}\nteam={{TEAM_NUMBER}}\n';
+    const crlf = 'name={{PROJECT_NAME}}\r\nteam={{TEAM_NUMBER}}\r\n';
+    const cr = 'name={{PROJECT_NAME}}\rteam={{TEAM_NUMBER}}\r';
+    expect(renderText(crlf, context)).toBe(renderText(lf, context));
+    expect(renderText(cr, context)).toBe(renderText(lf, context));
+  });
+
   it('keeps the four golden generator fixtures stable', async () => {
     const swerve = instantiateLimelightPreset(
       instantiateSwervePreset(projectModel(), {
@@ -146,10 +155,10 @@ describe('deterministic project generator', () => {
       ),
     );
     expect(digests).toEqual({
-      emptyBase: '15bd3cae41a24222abcaf163f194f3e8e4b2befce92aa552881d4d8be4f8b3ad',
-      shooter: 'b4f2a2a7bb02fdfdd2a59f96a29f9052a7a81a287df8622b1986e0e1e7a3f6f0',
-      singleMotor: '77da13e991fee8ecd90a374fda7aaa450b767f06e07437456a899492f88e712c',
-      swerveLimelight: 'cfbe9230af5d6edefcb5cbd2bafec4b018939ae7b00c1717808ce92daf5b1178',
+      emptyBase: 'b1acc994bb9a7e4afa55bf6974a430ed1a77c40b7c739f8b8dae241b5a1a2596',
+      shooter: '15b985281302f4cf6d2ffe95ae238f85b59b1b2c0aff4ed909cbdee0e73de7ca',
+      singleMotor: '94b771f5bbae7ee2eee28491c9f5b3a70bafd889d9d6f2c1bd781c1fb1a11e5d',
+      swerveLimelight: '8714b58087fb2c2eb2474e411b619e5b27b1052860038586754f1619d68622aa',
     });
   });
 
@@ -160,7 +169,7 @@ describe('deterministic project generator', () => {
     expect([...first.files.keys()]).toEqual([...second.files.keys()]);
     expect(mapDigest(first.files)).toBe(mapDigest(second.files));
     expect(mapDigest(first.files)).toBe(
-      '15bd3cae41a24222abcaf163f194f3e8e4b2befce92aa552881d4d8be4f8b3ad',
+      'b1acc994bb9a7e4afa55bf6974a430ed1a77c40b7c739f8b8dae241b5a1a2596',
     );
     expect(first.files.get('src/main/java/frc/robot/alpha/RobotContainer.java')).toContain(
       'package frc.robot.alpha;',

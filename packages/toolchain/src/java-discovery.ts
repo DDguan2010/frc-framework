@@ -102,11 +102,12 @@ export function wpilibRoots(
   homeDirectory: string,
   publicDirectory: string,
 ): readonly string[] {
+  const platformPath = platform === 'win32' ? path.win32 : path.posix;
   const roots =
     platform === 'win32'
-      ? [path.join(publicDirectory, 'wpilib'), path.join(homeDirectory, 'wpilib')]
-      : [path.join(homeDirectory, 'wpilib')];
-  return [...new Set(roots.map((root) => path.resolve(root)))];
+      ? [platformPath.join(publicDirectory, 'wpilib'), platformPath.join(homeDirectory, 'wpilib')]
+      : [platformPath.join(homeDirectory, 'wpilib')];
+  return [...new Set(roots.map((root) => platformPath.resolve(root)))];
 }
 
 export async function probeJava(executable: string): Promise<JavaProbeResult> {

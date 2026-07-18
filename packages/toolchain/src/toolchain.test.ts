@@ -21,11 +21,15 @@ describe('Java discovery', () => {
   it('prefers an explicit compatible JDK, then the matching WPILib year', async () => {
     const fixture = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-java-'));
     const publicDirectory = path.join(fixture, 'public');
+    const homeDirectory = path.join(fixture, 'home');
     const explicitHome = path.join(fixture, 'explicit');
+    const platform =
+      process.platform === 'win32' || process.platform === 'darwin' ? process.platform : 'linux';
     const javaName = process.platform === 'win32' ? 'java.exe' : 'java';
     const explicit = path.join(explicitHome, 'bin', javaName);
-    const matching = path.join(publicDirectory, 'wpilib', '2026', 'jdk', 'bin', javaName);
-    const older = path.join(publicDirectory, 'wpilib', '2025', 'jdk', 'bin', javaName);
+    const wpilibDirectory = platform === 'win32' ? publicDirectory : homeDirectory;
+    const matching = path.join(wpilibDirectory, 'wpilib', '2026', 'jdk', 'bin', javaName);
+    const older = path.join(wpilibDirectory, 'wpilib', '2025', 'jdk', 'bin', javaName);
     for (const executable of [explicit, matching, older]) {
       await mkdir(path.dirname(executable), { recursive: true });
       await writeFile(executable, 'fixture');
@@ -33,8 +37,8 @@ describe('Java discovery', () => {
     const discovered = await discoverJava({
       env: {},
       explicitJavaHome: explicitHome,
-      homeDirectory: path.join(fixture, 'home'),
-      platform: process.platform === 'win32' ? 'win32' : 'linux',
+      homeDirectory,
+      platform,
       probe: async (executable) => ({
         major: executable === older ? 11 : 17,
         version: executable === older ? '11.0.20' : '17.0.16',
@@ -71,12 +75,11 @@ describe('Java discovery', () => {
   });
 
   it('models official install roots and year requirements', () => {
-    expect(wpilibRoots('win32', 'C:\\Users\\robot', 'C:\\Users\\Public')[0]).toContain(
-      path.join('Users', 'Public', 'wpilib'),
-    );
-    expect(wpilibRoots('darwin', '/Users/robot', '/Users/Shared')).toEqual([
-      path.resolve('/Users/robot/wpilib'),
+    expect(wpilibRoots('win32', 'C:\\Users\\robot', 'C:\\Users\\Public')).toEqual([
+      'C:\\Users\\Public\\wpilib',
+      'C:\\Users\\robot\\wpilib',
     ]);
+    expect(wpilibRoots('darwin', '/Users/robot', '/Users/Shared')).toEqual(['/Users/robot/wpilib']);
     expect(requiredJavaMajor(2026)).toBe(17);
   });
 });

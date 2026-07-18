@@ -97,7 +97,7 @@ export function templateContext(model: FrcProjectModel): TemplateContext {
 }
 
 export function renderText(source: string, context: TemplateContext): string {
-  return source.replace(/\{\{([A-Z0-9_]+)\}\}/gu, (token, key: string) => {
+  return source.replace(/\r\n?/gu, '\n').replace(/\{\{([A-Z0-9_]+)\}\}/gu, (token, key: string) => {
     const value = context[key as keyof TemplateContext];
     if (value === undefined) {
       throw new Error(`Unknown template variable ${token}.`);
