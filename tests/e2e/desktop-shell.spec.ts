@@ -16,7 +16,12 @@ test('production shell is secure, accessible, and interactive', async () => {
   const projectRoot = path.join(userData, 'project');
   await mkdir(projectRoot);
   const application = await electron.launch({
-    args: [path.resolve('apps/desktop'), `--user-data-dir=${userData}`, '--e2e-skip-gradle'],
+    args: [
+      path.resolve('apps/desktop'),
+      `--user-data-dir=${userData}`,
+      '--e2e-skip-gradle',
+      ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
+    ],
     executablePath: electronExecutable,
   });
 

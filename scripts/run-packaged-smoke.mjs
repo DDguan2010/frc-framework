@@ -11,12 +11,13 @@ function executablePath() {
     return path.join(packageDirectory, 'frc-framework.exe');
   }
   if (process.platform === 'darwin') {
-    return path.join(packageDirectory, 'FRC Framework.app', 'Contents', 'MacOS', 'FRC Framework');
+    return path.join(packageDirectory, 'FRC Framework.app', 'Contents', 'MacOS', 'frc-framework');
   }
   return path.join(packageDirectory, 'frc-framework');
 }
 
-const child = spawn(executablePath(), ['--smoke-test'], {
+const launchArguments = ['--smoke-test', ...(process.platform === 'linux' ? ['--no-sandbox'] : [])];
+const child = spawn(executablePath(), launchArguments, {
   cwd: packageDirectory,
   shell: false,
   stdio: ['ignore', 'pipe', 'pipe'],
