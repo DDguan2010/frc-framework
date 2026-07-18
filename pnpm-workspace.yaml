@@ -6,4 +6,5 @@ onlyBuiltDependencies:
   - electron
   - electron-winstaller
   - esbuild
+  - macos-alias
   - simple-git-hooks

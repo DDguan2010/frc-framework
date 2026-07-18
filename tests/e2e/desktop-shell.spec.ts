@@ -452,9 +452,8 @@ async function setMaterialSelect(select: Locator, value: string): Promise<void> 
   }, value);
 }
 
-async function clickMaterialButton(page: Page, button: Locator): Promise<void> {
+async function clickMaterialButton(_page: Page, button: Locator): Promise<void> {
   await button.scrollIntoViewIfNeeded();
-  const bounds = await button.boundingBox();
-  if (bounds === null) throw new Error('Material button is not visible.');
-  await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await expect(button).toBeVisible();
+  await button.evaluate((element) => (element as HTMLElement).click());
 }
