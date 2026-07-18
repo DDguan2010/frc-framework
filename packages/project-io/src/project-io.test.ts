@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -203,6 +203,28 @@ describe('watching and locking', () => {
     expect(received.find((event) => event.path === 'project.yaml')?.external).toBe(false);
     expect(received.find((event) => event.path === 'src/Robot.java')).toEqual(
       expect.objectContaining({ conflict: true, external: true }),
+    );
+    await watcher.close();
+  });
+
+  it('recognizes an atomic replacement as a self write from its final disk content', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-watch-atomic-'));
+    const target = path.join(root, 'project.yaml');
+    const temporary = path.join(root, '.project.yaml.tmp');
+    await writeFile(target, 'before', 'utf8');
+    const received: ProjectFileEvent[] = [];
+    const watcher = new ProjectWatcher(root, {
+      debounceMs: 30,
+      onEvents: (events) => received.push(...events),
+    });
+    await watcher.start();
+    watcher.recordSelfWrite('project.yaml', 'after');
+    await writeFile(temporary, 'after', 'utf8');
+    await rm(target);
+    await rename(temporary, target);
+    await waitUntil(() => received.some((event) => event.path === 'project.yaml'));
+    expect(received.at(-1)).toEqual(
+      expect.objectContaining({ external: false, kind: 'change', path: 'project.yaml' }),
     );
     await watcher.close();
   });

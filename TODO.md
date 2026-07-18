@@ -665,6 +665,7 @@
 - [x] **CONT-090 P0** Java 扫描覆盖层按稳定实体 ID 去重，Subsystem 删除只在后端权威模型上执行级联，避免 Swerve Mechanism 删除产生重复 Command ID。
 - [x] **CONT-091 P0** 存在未处理 Diff 时阻止下一次结构化修改，并以中英文提示先应用或放弃上一次修改。
 - [x] **CONT-092 P1** 扩充独立实现的 IronPulse 兼容 Base（Beam Break、Rumble、布尔工具），并在 About、README 与第三方说明中鸣谢 IronPulse 6941。
+- [x] **CONT-093 P0** 文件监听器按防抖后的最终磁盘内容识别原子替换，避免 Linux 将软件自身生成写入误报为外部修改。
 
 ## 14. 首批开发迭代建议
 

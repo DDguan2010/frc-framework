@@ -90,22 +90,24 @@ export class ProjectWatcher {
     const events: ProjectFileEvent[] = [];
     for (const [relativePath, kind] of entries) {
       const expected = this.#selfWrites.get(relativePath);
-      let actual: string | null = null;
-      if (kind !== 'unlink') {
-        try {
-          actual = digest(await readFile(path.join(this.#root, relativePath), 'utf8'));
-        } catch {
-          actual = null;
-        }
+      let actual: string | null;
+      try {
+        actual = digest(await readFile(path.join(this.#root, relativePath), 'utf8'));
+      } catch {
+        actual = null;
       }
       const external = expected === undefined || expected !== actual;
       if (!external) {
         this.#selfWrites.delete(relativePath);
       }
+      // Atomic replacement is implemented as unlink + rename. Some platforms
+      // coalesce that pair to a stale unlink event even though the final file
+      // already exists, so report the state observed after debounce instead.
+      const observedKind = actual === null ? 'unlink' : kind === 'unlink' ? 'change' : kind;
       events.push({
         conflict: external && (this.#options.hasPendingChanges?.() ?? false),
         external,
-        kind,
+        kind: observedKind,
         path: relativePath,
       });
     }
