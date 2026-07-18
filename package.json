@@ -1,6 +1,6 @@
 {
   "name": "frc-framework",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "A structured desktop workspace for readable FRC robot projects.",
