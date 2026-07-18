@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import chokidar, { type FSWatcher } from 'chokidar';
 
+import { isIgnoredProjectPath, isWatchedProjectFile } from './project-files.js';
+
 export type ProjectFileEventKind = 'add' | 'change' | 'unlink';
 
 export interface ProjectFileEvent {
@@ -15,7 +17,7 @@ export interface ProjectFileEvent {
 
 export interface ProjectWatcherOptions {
   readonly debounceMs?: number;
-  readonly hasPendingChanges?: () => boolean;
+  readonly hasPendingChanges?: (relativePath: string) => boolean;
   readonly onEvents: (events: readonly ProjectFileEvent[]) => void;
 }
 
@@ -39,8 +41,7 @@ export class ProjectWatcher {
     this.#watcher = chokidar.watch('.', {
       awaitWriteFinish: { pollInterval: 25, stabilityThreshold: 75 },
       cwd: this.#root,
-      ignored: (watchedPath) =>
-        /(?:^|[\\/])(?:\.frc-framework|build|\.gradle|node_modules)(?:[\\/]|$)/u.test(watchedPath),
+      ignored: (watchedPath) => isIgnoredProjectPath(watchedPath),
       ignoreInitial: true,
     });
     this.#watcher.on('add', (file) => this.#queue('add', file));
@@ -73,7 +74,7 @@ export class ProjectWatcher {
   }
 
   #queue(kind: ProjectFileEventKind, relativePath: string): void {
-    if (!isProjectFile(relativePath)) {
+    if (!isWatchedProjectFile(relativePath)) {
       return;
     }
     this.#pending.set(normalize(relativePath), kind);
@@ -92,7 +93,7 @@ export class ProjectWatcher {
       const expected = this.#selfWrites.get(relativePath);
       let actual: string | null;
       try {
-        actual = digest(await readFile(path.join(this.#root, relativePath), 'utf8'));
+        actual = digest(await readFile(path.join(this.#root, relativePath)));
       } catch {
         actual = null;
       }
@@ -105,7 +106,7 @@ export class ProjectWatcher {
       // already exists, so report the state observed after debounce instead.
       const observedKind = actual === null ? 'unlink' : kind === 'unlink' ? 'change' : kind;
       events.push({
-        conflict: external && (this.#options.hasPendingChanges?.() ?? false),
+        conflict: external && (this.#options.hasPendingChanges?.(relativePath) ?? false),
         external,
         kind: observedKind,
         path: relativePath,
@@ -143,22 +144,10 @@ export function resolveConflict<T>(
   }
 }
 
-function digest(value: string): string {
+function digest(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
 function normalize(relativePath: string): string {
   return relativePath.replace(/\\/gu, '/');
-}
-
-function isProjectFile(relativePath: string): boolean {
-  const normalized = normalize(relativePath);
-  return (
-    normalized === 'project.yaml' ||
-    /^(?:build|settings)\.gradle(?:\.kts)?$/u.test(normalized) ||
-    normalized === 'gradle.properties' ||
-    /^src\/.*\.java$/u.test(normalized) ||
-    /^vendordeps\/.*\.json$/u.test(normalized) ||
-    /^docs\/.*\.(?:md|markdown)$/u.test(normalized)
-  );
 }

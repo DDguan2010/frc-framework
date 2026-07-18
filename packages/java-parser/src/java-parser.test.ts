@@ -44,6 +44,7 @@ describe('JavaParserService', () => {
       expect.objectContaining({
         controllerType: 'CommandXboxController',
         fieldName: 'driverController',
+        port: 0,
       }),
     ]);
     expect(index.commandMethods).toEqual([
@@ -66,6 +67,42 @@ describe('JavaParserService', () => {
     );
     expect(index.ownership.classification).toBe('recognized');
     expect(index.hasSyntaxErrors).toBe(false);
+  });
+
+  it('indexes inheritance, field initializers, enum values, and non-zero controller ports', () => {
+    const index = parser.index(`
+      package frc.robot.subsystems.arm;
+      import edu.wpi.first.wpilibj2.command.SubsystemBase;
+      import edu.wpi.first.wpilibj2.command.button.CommandPS5Controller;
+
+      public final class ArmSubsystem extends SubsystemBase implements AutoCloseable {
+        private final CommandPS5Controller operator = new CommandPS5Controller(3);
+        enum Goal { STOW, INTAKE, SCORE }
+        @Override public void close() {}
+      }
+    `);
+
+    expect(index.types[0]).toMatchObject({
+      enumConstants: [],
+      extendsTypes: ['SubsystemBase'],
+      implementsTypes: ['AutoCloseable'],
+      name: 'ArmSubsystem',
+    });
+    expect(index.types.find((type) => type.name === 'Goal')?.enumConstants).toEqual([
+      'STOW',
+      'INTAKE',
+      'SCORE',
+    ]);
+    expect(index.controllers[0]).toMatchObject({
+      controllerType: 'CommandPS5Controller',
+      fieldName: 'operator',
+      port: 3,
+    });
+    expect(index.states[0]).toMatchObject({
+      name: 'Goal',
+      role: 'goal',
+      values: ['STOW', 'INTAKE', 'SCORE'],
+    });
   });
 
   it('keeps useful symbols when Java is temporarily incomplete', () => {

@@ -217,7 +217,14 @@ function readType(node: SyntaxNode): JavaType {
     ) ?? [];
 
   return {
+    enumConstants:
+      body?.namedChildren
+        .filter((child) => child.type === 'enum_constant')
+        .map((child) => child.childForFieldName('name')?.text ?? child.text.split('(')[0] ?? '')
+        .filter(Boolean) ?? [],
+    extendsTypes: readTypeList(node, ['extends_interfaces', 'superclass'], ['extends']),
     fields: fields.flatMap(readFields),
+    implementsTypes: readTypeList(node, ['super_interfaces'], ['implements']),
     kind: typeKinds[node.type] ?? 'class',
     methods: methods.map(readMethod),
     modifiers: readModifiers(node),
@@ -236,12 +243,17 @@ function readFields(node: SyntaxNode): JavaField[] {
       ? declarators.map((declarator) => declarator.childForFieldName('name')?.text ?? '<unknown>')
       : [node.childForFieldName('name')?.text ?? '<unknown>'];
 
-  return names.map((name) => ({
-    modifiers: readModifiers(node),
-    name,
-    range: rangeOf(node),
-    type,
-  }));
+  return names.map((name, index) => {
+    const declarator = declarators[index];
+    const initializer = declarator?.childForFieldName('value')?.text;
+    return {
+      ...(initializer === undefined ? {} : { initializer }),
+      modifiers: readModifiers(node),
+      name,
+      range: rangeOf(node),
+      type,
+    };
+  });
 }
 
 function readMethod(node: SyntaxNode): JavaMethod {
@@ -284,7 +296,20 @@ function readController(field: JavaField): ControllerDeclaration[] {
   if (!controllerTypes.has(simpleType)) {
     return [];
   }
-  return [{ controllerType: simpleType, fieldName: field.name, range: field.range }];
+  const portText =
+    field.initializer === undefined
+      ? undefined
+      : /new\s+[\w$.]*\b(?:CommandGenericHID|CommandJoystick|CommandPS4Controller|CommandPS5Controller|CommandXboxController|GenericHID|Joystick|XboxController)\s*\(\s*(\d+)/u.exec(
+          field.initializer,
+        )?.[1];
+  return [
+    {
+      controllerType: simpleType,
+      fieldName: field.name,
+      ...(portText === undefined ? {} : { port: Number(portText) }),
+      range: field.range,
+    },
+  ];
 }
 
 function readBinding(node: SyntaxNode): CommandBinding[] {
@@ -317,8 +342,24 @@ function readStates(types: readonly JavaType[]): StateDeclaration[] {
           : lowerName.includes('state')
             ? 'state'
             : 'enum';
-      return { name: type.name, range: type.range, role };
+      return { name: type.name, range: type.range, role, values: type.enumConstants };
     });
+}
+
+function readTypeList(
+  node: SyntaxNode,
+  nodeTypes: readonly string[],
+  keywords: readonly string[],
+): readonly string[] {
+  const relation = node.namedChildren.find((child) => nodeTypes.includes(child.type));
+  if (relation === undefined) return [];
+  let text = relation.text;
+  for (const keyword of keywords) text = text.replace(new RegExp(`^${keyword}\\s+`, 'u'), '');
+  return text
+    .replace(/[{}]/gu, '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function recognizePatterns(

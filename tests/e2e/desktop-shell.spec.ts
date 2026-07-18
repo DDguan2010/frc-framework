@@ -210,6 +210,15 @@ test('production shell is secure, accessible, and interactive', async () => {
       `,
       'utf8',
     );
+    const pathplannerSource = path.join(
+      projectRoot,
+      'src/main/deploy/pathplanner/paths/Center.path',
+    );
+    await mkdir(path.dirname(pathplannerSource), { recursive: true });
+    await writeFile(pathplannerSource, '{}\n', 'utf8');
+    const modelAsset = path.join(projectRoot, 'ascope_assets/robot.glb');
+    await mkdir(path.dirname(modelAsset), { recursive: true });
+    await writeFile(modelAsset, new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
     await clickMaterialButton(
       page,
       page
@@ -222,6 +231,14 @@ test('production shell is secure, accessible, and interactive', async () => {
     ).toBeVisible({
       timeout: 15_000,
     });
+    const importedCommandRow = page
+      .getByRole('main')
+      .locator('.hierarchy-row')
+      .filter({ hasText: 'flash()' });
+    await expect(importedCommandRow).toContainText(i18n.t('structured.importedReadOnly'));
+    await expect(
+      importedCommandRow.getByRole('button', { name: i18n.t('tree.delete') }),
+    ).toHaveCount(0);
     await clickMaterialButton(
       page,
       page
@@ -233,6 +250,45 @@ test('production shell is secure, accessible, and interactive', async () => {
       page.getByRole('main').getByRole('strong').filter({ hasText: 'centerAuto()' }),
     ).toBeVisible();
     await waitForExternalSync(page);
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          const shell = element as HTMLElement & {
+            project?: {
+              sourceFiles?: readonly {
+                binary?: boolean;
+                kind?: string;
+                path?: string;
+              }[];
+            };
+          };
+          return shell.project?.sourceFiles
+            ?.filter((file) =>
+              ['ascope_assets/robot.glb', 'src/main/deploy/pathplanner/paths/Center.path'].includes(
+                file.path ?? '',
+              ),
+            )
+            .map((file) => ({ binary: file.binary, kind: file.kind, path: file.path }));
+        }),
+      )
+      .toEqual([
+        { binary: true, kind: 'asset', path: 'ascope_assets/robot.glb' },
+        {
+          binary: false,
+          kind: 'pathplanner',
+          path: 'src/main/deploy/pathplanner/paths/Center.path',
+        },
+      ]);
+
+    await page.getByRole('button', { exact: true, name: i18n.t('tree.source') }).click();
+    const sourceSearch = page.locator('md-outlined-text-field.tree-search');
+    await setMaterialField(sourceSearch, 'Center.path');
+    await page.getByRole('treeitem', { name: /Center\.path/u }).click();
+    await expect(page.getByRole('button', { name: i18n.t('inspector.addImport') })).toHaveCount(0);
+    await setMaterialField(sourceSearch, 'TeamCommands.java');
+    await page.getByRole('treeitem', { name: /TeamCommands\.java/u }).click();
+    await expect(page.getByRole('button', { name: i18n.t('inspector.addImport') })).toBeVisible();
+    await page.getByRole('button', { exact: true, name: i18n.t('tree.logic') }).click();
 
     await page
       .getByRole('navigation', { name: i18n.t('nav.workspace') })

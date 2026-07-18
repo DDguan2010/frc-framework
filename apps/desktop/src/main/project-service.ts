@@ -26,7 +26,9 @@ import {
   applyFileTransaction,
   calculateFileDiff,
   createCandidateOutput,
+  classifyProjectFile,
   isSafeAutoApply,
+  isIgnoredProjectPath,
   inspectProjectYamlMigration,
   loadProjectYaml,
   migrateProjectYaml,
@@ -212,12 +214,7 @@ export class ProjectService {
               ]),
         ],
         readOnly,
-        sourceFiles: await sourceFiles(
-          root,
-          sourceReport,
-          this.#externalFiles,
-          parsed.model?.unmanagedFiles,
-        ),
+        sourceFiles: await sourceFiles(root, sourceReport, this.#externalFiles),
       };
       this.#session = parsed.model === undefined ? undefined : new DomainSession(parsed.model);
       this.#sourceImportPending = false;
@@ -229,10 +226,13 @@ export class ProjectService {
       let report: SourceImportReport | undefined;
       if (javaFiles > 0)
         report = await this.#javaIndexer().then((indexer) => indexer.indexProject(root));
+      const browseOnly = report === undefined;
+      const visibleModel = report?.model ?? (await createBrowseOnlyModel(root));
       result = {
         displayName: path.basename(root),
         mode: 'source',
-        ...(report === undefined ? {} : { model: report.model }),
+        model: visibleModel,
+        ...(browseOnly ? { sourceBrowseOnly: true } : {}),
         ...(report === undefined
           ? {}
           : {
@@ -245,20 +245,16 @@ export class ProjectService {
               },
             }),
         path: root,
-        problems:
-          javaFiles === 0
-            ? ['No project.yaml or Java source files were found.']
-            : [
-                `project.yaml is missing; source fallback found ${String(javaFiles)} Java files.`,
-                ...(report?.problems ?? []),
-              ],
+        problems: browseOnly
+          ? [
+              'No project.yaml or Java source files were found; structured Java editing is disabled.',
+            ]
+          : [
+              `project.yaml is missing; source fallback found ${String(javaFiles)} Java files.`,
+              ...(report?.problems ?? []),
+            ],
         readOnly,
-        sourceFiles: await sourceFiles(
-          root,
-          report,
-          this.#externalFiles,
-          report?.model.unmanagedFiles,
-        ),
+        sourceFiles: await sourceFiles(root, report, this.#externalFiles),
       };
       this.#session = report === undefined ? undefined : new DomainSession(report.model);
       this.#sourceImportPending = report !== undefined;
@@ -626,7 +622,10 @@ export class ProjectService {
 
   async #startWatcher(root: string): Promise<void> {
     const watcher = new ProjectWatcher(root, {
-      hasPendingChanges: () => this.#pending !== undefined,
+      hasPendingChanges: (relativePath) =>
+        this.#pending?.changes.some(
+          (change) => change.kind !== 'unchanged' && change.path === relativePath,
+        ) ?? false,
       onEvents: (events) => this.#handleFileEvents(events),
     });
     await watcher.start();
@@ -661,7 +660,7 @@ export class ProjectService {
       path: root,
       problems,
       readOnly: this.#lock?.mode !== 'read-write',
-      sourceFiles: await sourceFiles(root, report, this.#externalFiles, model.unmanagedFiles),
+      sourceFiles: await sourceFiles(root, report, this.#externalFiles),
     };
   }
 
@@ -709,12 +708,9 @@ export class ProjectService {
     return this.#indexer;
   }
 
-  async #sourceFiles(
-    root: string,
-    model = this.#session?.model,
-  ): Promise<readonly ProjectSourceFile[]> {
+  async #sourceFiles(root: string): Promise<readonly ProjectSourceFile[]> {
     const report = await this.#sourceReport(root);
-    return sourceFiles(root, report, this.#externalFiles, model?.unmanagedFiles);
+    return sourceFiles(root, report, this.#externalFiles);
   }
 
   async #sourceReport(root: string): Promise<SourceImportReport | undefined> {
@@ -807,13 +803,134 @@ interface PendingChange {
 
 /**
  * Adds read-only entities discovered in Java to the UI model without writing them into project.yaml.
- * Structured entities remain authoritative; source-only entries are rediscovered after every refresh.
+ * Structured entities remain authoritative; source-only entries are replaced from the latest index so
+ * deleted or renamed handwritten types do not remain as stale editable nodes.
  */
 function mergeSourceOverlay(
   structured: FrcProjectModel,
   inferred: FrcProjectModel,
 ): FrcProjectModel {
-  const commands = [...structured.commands];
+  const unmanaged = new Set(structured.unmanagedFiles.map(normalizeOverlayPath));
+  const importedSubsystemIds = new Set(
+    structured.subsystems
+      .filter(
+        (subsystem) =>
+          subsystem.javaFile !== undefined &&
+          unmanaged.has(normalizeOverlayPath(subsystem.javaFile)),
+      )
+      .map((subsystem) => subsystem.id),
+  );
+  let foundImportedAncestor = true;
+  while (foundImportedAncestor) {
+    foundImportedAncestor = false;
+    for (const subsystem of structured.subsystems) {
+      if (
+        !importedSubsystemIds.has(subsystem.id) &&
+        structured.subsystems.some(
+          (candidate) =>
+            importedSubsystemIds.has(candidate.id) && candidate.parentId === subsystem.id,
+        )
+      ) {
+        importedSubsystemIds.add(subsystem.id);
+        foundImportedAncestor = true;
+      }
+    }
+  }
+
+  const subsystems = structured.subsystems.filter(
+    (subsystem) => !importedSubsystemIds.has(subsystem.id),
+  );
+  const inferredToVisibleSubsystem = new Map<string, string>();
+  const matchedStructuredSubsystems = new Set<string>();
+  for (const subsystem of inferred.subsystems) {
+    const match =
+      subsystems.find((candidate) => candidate.id === subsystem.id) ??
+      subsystems.find(
+        (candidate) =>
+          !matchedStructuredSubsystems.has(candidate.id) &&
+          candidate.symbol === subsystem.symbol &&
+          (candidate.javaFile === undefined || candidate.javaFile === subsystem.javaFile),
+      );
+    const visibleId = match?.id ?? subsystem.id;
+    inferredToVisibleSubsystem.set(subsystem.id, visibleId);
+    if (match !== undefined) matchedStructuredSubsystems.add(match.id);
+  }
+  for (const subsystem of inferred.subsystems) {
+    if (matchedStructuredSubsystems.has(inferredToVisibleSubsystem.get(subsystem.id) ?? ''))
+      continue;
+    subsystems.push({
+      ...subsystem,
+      ...(subsystem.parentId === undefined
+        ? {}
+        : {
+            parentId: inferredToVisibleSubsystem.get(subsystem.parentId) ?? subsystem.parentId,
+          }),
+      ...(subsystem.dependencies === undefined
+        ? {}
+        : {
+            dependencies: subsystem.dependencies.map((dependency) => ({
+              ...dependency,
+              targetSubsystemId:
+                inferredToVisibleSubsystem.get(dependency.targetSubsystemId) ??
+                dependency.targetSubsystemId,
+            })),
+          }),
+    });
+  }
+
+  const devices = structured.devices.filter((device) => !importedSubsystemIds.has(device.parentId));
+  for (const device of inferred.devices) {
+    const parentId = inferredToVisibleSubsystem.get(device.parentId) ?? device.parentId;
+    if (
+      devices.some(
+        (candidate) =>
+          candidate.id === device.id ||
+          (candidate.parentId === parentId && candidate.symbol === device.symbol),
+      )
+    )
+      continue;
+    devices.push({ ...device, parentId });
+  }
+
+  const importedControllerIds = new Set(
+    structured.controllers
+      .filter(
+        (controller) =>
+          isStableSourceId(controller.id) &&
+          (structured.bindings.some(
+            (binding) =>
+              binding.controllerId === controller.id && binding.codeReference !== undefined,
+          ) ||
+            inferred.controllers.some((candidate) => candidate.id === controller.id)),
+      )
+      .map((controller) => controller.id),
+  );
+  const controllers = structured.controllers.filter(
+    (controller) => !importedControllerIds.has(controller.id),
+  );
+  const inferredToVisibleController = new Map<string, string>();
+  for (const controller of inferred.controllers) {
+    const match =
+      controllers.find((candidate) => candidate.id === controller.id) ??
+      controllers.find(
+        (candidate) =>
+          candidate.symbol === controller.symbol &&
+          candidate.provider === controller.provider &&
+          candidate.port === controller.port,
+      );
+    inferredToVisibleController.set(controller.id, match?.id ?? controller.id);
+    if (match === undefined) controllers.push(controller);
+  }
+
+  const importedCommandIds = new Set(
+    structured.commands
+      .filter(
+        (command) =>
+          command.javaFile !== undefined && unmanaged.has(normalizeOverlayPath(command.javaFile)),
+      )
+      .map((command) => command.id),
+  );
+  const commands = structured.commands.filter((command) => !importedCommandIds.has(command.id));
   const inferredToVisibleCommand = new Map<string, string>();
   const matchedStructuredCommands = new Set<string>();
   const symbolCounts = new Map<string, number>();
@@ -846,17 +963,71 @@ function mergeSourceOverlay(
     }
   }
 
-  const autos = [...structured.autos];
-  for (const auto of inferred.autos) {
-    if (autos.some((candidate) => candidate.symbol === auto.symbol)) continue;
-    autos.push({
-      ...auto,
-      ...(auto.commandId === undefined
-        ? {}
-        : { commandId: inferredToVisibleCommand.get(auto.commandId) ?? auto.commandId }),
+  const bindings = structured.bindings.filter((binding) => binding.codeReference === undefined);
+  for (const binding of inferred.bindings) {
+    const controllerId =
+      inferredToVisibleController.get(binding.controllerId) ?? binding.controllerId;
+    const commandId =
+      binding.commandId === undefined
+        ? undefined
+        : (inferredToVisibleCommand.get(binding.commandId) ?? binding.commandId);
+    if (
+      bindings.some(
+        (candidate) =>
+          candidate.id === binding.id ||
+          (candidate.controllerId === controllerId &&
+            candidate.commandId === commandId &&
+            candidate.input === binding.input &&
+            candidate.behavior === binding.behavior),
+      )
+    )
+      continue;
+    bindings.push({
+      ...binding,
+      controllerId,
+      ...(commandId === undefined ? {} : { commandId }),
     });
   }
-  return { ...structured, autos, commands };
+
+  const autos = structured.autos.filter(
+    (auto) => auto.commandId === undefined || !importedCommandIds.has(auto.commandId),
+  );
+  for (const auto of inferred.autos) {
+    const commandId =
+      auto.commandId === undefined
+        ? undefined
+        : (inferredToVisibleCommand.get(auto.commandId) ?? auto.commandId);
+    if (
+      autos.some(
+        (candidate) =>
+          candidate.id === auto.id ||
+          (candidate.symbol === auto.symbol && candidate.commandId === commandId),
+      )
+    )
+      continue;
+    autos.push({
+      ...auto,
+      ...(commandId === undefined ? {} : { commandId }),
+    });
+  }
+  return {
+    ...structured,
+    autos,
+    bindings,
+    commands,
+    controllers,
+    devices,
+    subsystems,
+    unmanagedFiles: [...new Set([...structured.unmanagedFiles, ...inferred.unmanagedFiles])].sort(),
+  };
+}
+
+function normalizeOverlayPath(value: string): string {
+  return value.replace(/\\/gu, '/');
+}
+
+function isStableSourceId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 }
 
 async function detectDirectoryKind(
@@ -866,11 +1037,26 @@ async function detectDirectoryKind(
   if (entries.length === 0) {
     return 'empty';
   }
-  const frcMarkers = ['project.yaml', 'build.gradle', 'build.gradle.kts', 'settings.gradle'];
+  const frcMarkers = [
+    'project.yaml',
+    'build.gradle',
+    'build.gradle.kts',
+    'settings.gradle',
+    'settings.gradle.kts',
+    'CMakeLists.txt',
+    'pom.xml',
+  ];
   for (const marker of frcMarkers) {
     if (entries.includes(marker) && (await stat(path.join(directoryPath, marker))).isFile()) {
       return 'frc-project';
     }
+  }
+  if (
+    entries.includes('src') &&
+    (await directoryExists(path.join(directoryPath, 'src'))) &&
+    (entries.includes('.wpilib') || entries.includes('vendordeps'))
+  ) {
+    return 'frc-project';
   }
   return 'directory';
 }
@@ -885,11 +1071,39 @@ async function countJavaFiles(root: string): Promise<number> {
   }
 }
 
+async function createBrowseOnlyModel(root: string): Promise<FrcProjectModel> {
+  let teamNumber = 1;
+  try {
+    const preferences = JSON.parse(
+      (await readOptional(path.join(root, '.wpilib', 'wpilib_preferences.json'))) ?? '{}',
+    ) as { teamNumber?: number };
+    if (Number.isInteger(preferences.teamNumber) && (preferences.teamNumber ?? 0) > 0)
+      teamNumber = preferences.teamNumber ?? 1;
+  } catch {
+    // Browsing does not require valid WPILib preferences.
+  }
+  let wpilibYear = new Date().getUTCFullYear();
+  for (const buildFile of ['build.gradle', 'build.gradle.kts']) {
+    const build = await readOptional(path.join(root, buildFile));
+    const year =
+      build === undefined ? undefined : /GradleRIO[^\n]*?["']((?:20)\d{2})\./u.exec(build)?.[1];
+    if (year !== undefined) {
+      wpilibYear = Number(year);
+      break;
+    }
+  }
+  return createEmptyProject({
+    javaPackage: 'frc.robot',
+    name: path.basename(root),
+    teamNumber,
+    wpilibYear,
+  });
+}
+
 async function sourceFiles(
   root: string,
   report?: SourceImportReport,
   externallyModified: ReadonlySet<string> = new Set(),
-  unmanagedFiles: readonly string[] = [],
 ): Promise<readonly ProjectSourceFile[]> {
   const files: ProjectSourceFile[] = [];
   const indexed = new Map(report?.files.map((file) => [file.path.replace(/\\/gu, '/'), file]));
@@ -901,27 +1115,33 @@ async function sourceFiles(
       return;
     }
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (entry.name === '.frc-framework' || entry.name === 'build' || entry.name === '.gradle')
-        continue;
       const child = path.join(directory, entry.name);
-      if (entry.isDirectory()) await visit(child);
-      else if (entry.isFile() && /\.(?:java|gradle|json|md|ya?ml)$/u.test(entry.name)) {
-        const relativePath = path.relative(root, child).replace(/\\/gu, '/');
+      const relativePath = path.relative(root, child).replace(/\\/gu, '/');
+      if (entry.isDirectory()) {
+        if (!isIgnoredProjectPath(relativePath)) await visit(child);
+      } else if (entry.isFile()) {
+        const descriptor = classifyProjectFile(relativePath);
+        if (descriptor === undefined) continue;
         const index = indexed.get(relativePath);
-        const content = await readOptional(child);
-        const ownership = unmanagedFiles.includes(relativePath)
-          ? 'custom'
-          : (index?.classification ??
-            (content?.includes('<frc-framework:managed>') === true
-              ? 'managed'
-              : content?.includes('<frc-framework:recognized>') === true
-                ? 'recognized'
-                : 'custom'));
+        const metadata = await stat(child);
+        const content =
+          descriptor.binary || metadata.size > 1_000_000 ? undefined : await readOptional(child);
+        const ownership =
+          index?.classification ??
+          (content?.includes('<frc-framework:managed>') === true
+            ? 'managed'
+            : content?.includes('<frc-framework:recognized>') === true
+              ? 'recognized'
+              : 'custom');
         files.push({
+          binary: descriptor.binary,
           externallyModified: externallyModified.has(relativePath),
+          format: descriptor.format,
+          kind: descriptor.kind,
           ownership,
           path: relativePath,
           problemCount: index?.index.problems.length ?? 0,
+          size: metadata.size,
           ...(index === undefined ? {} : { symbols: sourceSymbols(index.index) }),
         });
       }
@@ -939,15 +1159,24 @@ function sourceSymbols(
     kind: NonNullable<ProjectSourceFile['symbols']>[number]['kind'],
     range: { readonly start: { readonly row: number; readonly column: number } },
   ) => ({ column: range.start.column + 1, kind, label, line: range.start.row + 1 });
+  const commandMethods = new Set(
+    index.commandMethods.map(
+      (method) => `${method.name}:${method.parameters}:${String(method.range.start.row)}`,
+    ),
+  );
   return [
     ...index.types.flatMap((type) => [
       point(type.name, 'type', type.range),
       ...type.fields.map((field) => point(`${field.type} ${field.name}`, 'field', field.range)),
-      ...type.methods.map((method) =>
-        point(`${method.name}(${method.parameters})`, 'method', method.range),
+      ...type.methods.flatMap((method) =>
+        commandMethods.has(`${method.name}:${method.parameters}:${String(method.range.start.row)}`)
+          ? []
+          : [point(`${method.name}${method.parameters}`, 'method', method.range)],
       ),
     ]),
-    ...index.commandMethods.map((method) => point(method.name, 'command', method.range)),
+    ...index.commandMethods.map((method) =>
+      point(`${method.name}${method.parameters}`, 'command', method.range),
+    ),
     ...index.bindings.map((binding) =>
       point(`${binding.triggerExpression}.${binding.event}`, 'binding', binding.range),
     ),

@@ -15,7 +15,7 @@ import {
 } from '@frc-framework/domain';
 
 import { JavaParserService, type JavaParserOptions } from './java-parser.js';
-import type { JavaSourceIndex, SourceClassification } from './types.js';
+import type { JavaSourceIndex, JavaType, SourceClassification } from './types.js';
 
 export interface IndexedProjectFile {
   readonly path: string;
@@ -124,11 +124,16 @@ async function projectMetadata(
   const problems: string[] = [];
   const robotFile = files.find(
     (file) =>
-      file.path.endsWith('/Robot.java') || file.path === 'src/main/java/frc/robot/Robot.java',
+      /\/(?:Robot|RobotContainer|Main)\.java$/u.test(file.path) ||
+      /^(?:Robot|RobotContainer|Main)\.java$/u.test(file.path),
   );
   const javaPackage =
     robotFile?.index.packageName ??
-    files.find((file) => file.index.packageName !== undefined)?.index.packageName ??
+    inferBasePackage(
+      files.flatMap((file) =>
+        file.index.packageName === undefined ? [] : [file.index.packageName],
+      ),
+    ) ??
     'frc.robot';
   let teamNumber = 1;
   try {
@@ -163,6 +168,26 @@ async function projectMetadata(
   return { javaPackage, problems, teamNumber, vendordeps, wpilibYear };
 }
 
+function inferBasePackage(packages: readonly string[]): string | undefined {
+  if (packages.length === 0) return undefined;
+  const split = packages.map((packageName) => packageName.split('.'));
+  const shortest = Math.min(...split.map((segments) => segments.length));
+  const common: string[] = [];
+  for (let index = 0; index < shortest; index += 1) {
+    const segment = split[0]?.[index];
+    if (segment === undefined || split.some((segments) => segments[index] !== segment)) break;
+    common.push(segment);
+  }
+  if (common.length >= 2) return common.join('.');
+
+  const first = split[0] ?? [];
+  const structuralIndex = first.findIndex((segment) =>
+    /^(?:auto|commands?|constants?|subsystems?|mechanisms?)$/iu.test(segment),
+  );
+  if (structuralIndex >= 2) return first.slice(0, structuralIndex).join('.');
+  return packages[0];
+}
+
 function inferModel(
   root: string,
   files: readonly IndexedProjectFile[],
@@ -187,7 +212,7 @@ function inferModel(
   }
   const devices = inferDevices(files, subsystemByFile);
   const controllers = inferControllers(files);
-  const commands = inferCommands(files);
+  const commands = inferCommands(files, metadata.javaPackage);
   const controllerByField = new Map(controllers.map((entry) => [entry.symbol, entry]));
   const bindings = inferBindings(files, controllerByField, commands);
   const autos = inferAutos(files, commands);
@@ -201,6 +226,10 @@ function inferModel(
     project: { ...base.project, symbol: javaSymbol(name) },
     robot: { ...base.robot, id: stableId('robot') },
     subsystems,
+    unmanagedFiles: files
+      .filter((file) => file.classification !== 'managed')
+      .map((file) => file.path)
+      .sort(),
   };
 }
 
@@ -241,21 +270,25 @@ function inferSubsystems(
   basePackage: string,
 ): readonly Subsystem[] {
   const candidates = files.flatMap((file) => {
-    const match = /(?:^|\/)subsystems\/(.+)\.java$/u.exec(file.path);
-    const primary = file.index.types.find((type) => type.kind === 'class');
     if (
-      match === null ||
-      primary === undefined ||
-      primary.name.endsWith('Config') ||
-      primary.name.endsWith('Constants')
-    )
+      file.index.packageName === undefined ||
+      !(
+        file.index.packageName === basePackage ||
+        file.index.packageName.startsWith(`${basePackage}.`)
+      )
+    ) {
       return [];
+    }
+    const match = /(?:^|\/)(?:subsystems?|mechanisms?)\/(.+)\.java$/iu.exec(file.path);
+    const primary = file.index.types.find((type) => type.kind === 'class');
+    if (match === null || primary === undefined) return [];
     const segments = match[1]?.split('/') ?? [];
     const directories = segments.slice(0, -1);
     const directory = directories.join('/');
     const ownsDirectory =
       directories.length > 0 &&
       javaSymbol(directories.at(-1) ?? '').toLowerCase() === primary.name.toLowerCase();
+    if (!isSubsystemCandidate(file, primary, ownsDirectory)) return [];
     return [{ directories, directory, file, ownsDirectory, primary }];
   });
   const directoryOwners = new Map(
@@ -273,6 +306,7 @@ function inferSubsystems(
   const result: Subsystem[] = [];
   for (const candidate of candidates) {
     const { directories, file, ownsDirectory, primary } = candidate;
+    const nodeId = actualIds.get(file.path)!;
     const searchLength = ownsDirectory ? directories.length - 1 : directories.length;
     let parentId: Subsystem['parentId'];
     for (let length = searchLength; length > 0; length -= 1) {
@@ -304,13 +338,15 @@ function inferSubsystems(
       }
     }
     result.push({
-      behaviorMode: file.index.states.some((state) => state.role === 'goal')
+      behaviorMode: file.index.states.some(
+        (state) => state.role === 'goal' || state.role === 'state',
+      )
         ? 'goal-driven'
         : file.index.commandMethods.length > 0
           ? 'custom'
           : 'direct',
       displayName: primary.name,
-      id: actualIds.get(file.path)!,
+      id: nodeId,
       javaFile: file.path,
       ...(file.index.packageName === undefined ? {} : { javaPackage: file.index.packageName }),
       kind:
@@ -324,12 +360,63 @@ function inferSubsystems(
       simulationImplementation: file.index.patterns.some((pattern) =>
         pattern.symbol.includes('Sim'),
       ),
+      ...stateMachine(file),
       symbol: primary.name,
     });
   }
   return [...syntheticRoots.values(), ...result].sort((left, right) =>
     left.displayName.localeCompare(right.displayName),
   );
+}
+
+function isSubsystemCandidate(
+  file: IndexedProjectFile,
+  primary: JavaType,
+  ownsDirectory: boolean,
+): boolean {
+  if (
+    /(?:Config|Constants|Factory|Calculator|Solution|Params?|Inputs?|Outputs?|Hardware|Util|Utils)$/u.test(
+      primary.name,
+    )
+  ) {
+    return false;
+  }
+  const inheritance = [...primary.extendsTypes, ...primary.implementsTypes].map(simpleJavaType);
+  const inheritedSubsystem = inheritance.some((name) =>
+    /(?:Subsystem|SubsystemBase|Superstructure|Mechanism|Swerve)$/u.test(name),
+  );
+  const namedSubsystem = /(?:Subsystem|Superstructure|Mechanism)$/u.test(primary.name);
+  const hasMotor = primary.fields.some((field) =>
+    /Motor(?:IO|Subsystem)|TalonFX|Spark(?:Max|Flex)/u.test(field.type),
+  );
+  const hasCommandSurface = file.index.commandMethods.length > 0;
+  return ownsDirectory || inheritedSubsystem || namedSubsystem || (hasMotor && hasCommandSurface);
+}
+
+function stateMachine(
+  file: IndexedProjectFile,
+): Pick<Subsystem, 'stateMachine'> | Record<string, never> {
+  const declaration = file.index.states.find(
+    (state) => (state.role === 'goal' || state.role === 'state') && state.values.length > 0,
+  );
+  if (declaration === undefined) return {};
+  return {
+    stateMachine: {
+      states: declaration.values.map((value, index) => ({
+        actions: [],
+        displayName: value,
+        id: stableId(`state:${file.path}:${declaration.name}:${value}`),
+        initial: index === 0,
+        symbol: javaSymbol(value),
+      })),
+      transitions: [],
+    },
+  };
+}
+
+function simpleJavaType(value: string): string {
+  const withoutGenerics = value.replace(/<.*>/su, '').trim();
+  return withoutGenerics.split('.').at(-1) ?? withoutGenerics;
 }
 
 function inferDevices(
@@ -363,13 +450,20 @@ function inferDevices(
 
 function inferControllers(files: readonly IndexedProjectFile[]): readonly Controller[] {
   const controllers: Controller[] = [];
+  const usedPorts = new Set<number>();
   for (const file of files) {
     for (const declaration of file.index.controllers) {
       if (controllers.some((entry) => entry.symbol === declaration.fieldName)) continue;
+      let port = declaration.port;
+      if (port === undefined || usedPorts.has(port)) {
+        port = 0;
+        while (usedPorts.has(port)) port += 1;
+      }
+      usedPorts.add(port);
       controllers.push({
         displayName: declaration.fieldName,
         id: stableId(`controller:${file.path}:${declaration.fieldName}`),
-        port: controllers.length,
+        port,
         provider: declaration.controllerType,
         role: /operator|copilot|manipulator/iu.test(declaration.fieldName) ? 'operator' : 'driver',
         symbol: declaration.fieldName,
@@ -379,8 +473,11 @@ function inferControllers(files: readonly IndexedProjectFile[]): readonly Contro
   return controllers;
 }
 
-function inferCommands(files: readonly IndexedProjectFile[]): readonly CommandDefinition[] {
-  return files.flatMap((file) =>
+function inferCommands(
+  files: readonly IndexedProjectFile[],
+  basePackage: string,
+): readonly CommandDefinition[] {
+  const factories = files.flatMap((file) =>
     file.index.commandMethods.map((method) => ({
       displayName: `${method.name}${method.parameters}`,
       id: stableId(`command:${file.path}:${method.name}:${method.parameters}`),
@@ -390,6 +487,36 @@ function inferCommands(files: readonly IndexedProjectFile[]): readonly CommandDe
       symbol: method.name,
     })),
   );
+  const commandClasses = files.flatMap((file) => {
+    if (
+      file.index.packageName === undefined ||
+      !(
+        file.index.packageName === basePackage ||
+        file.index.packageName.startsWith(`${basePackage}.`)
+      )
+    ) {
+      return [];
+    }
+    return file.index.types
+      .filter(
+        (type) =>
+          type.kind === 'class' &&
+          (type.name.endsWith('Command') ||
+            [...type.extendsTypes, ...type.implementsTypes].some((name) =>
+              /(?:^|\.)(?:Command|CommandBase)$/u.test(simpleJavaType(name)),
+            )),
+      )
+      .map((type) => ({
+        displayName: type.name,
+        factory: false,
+        id: stableId(`command-class:${file.path}:${type.name}`),
+        javaFile: file.path,
+        kind: 'custom' as const,
+        requirementIds: [],
+        symbol: type.name,
+      }));
+  });
+  return [...factories, ...commandClasses];
 }
 
 function inferBindings(

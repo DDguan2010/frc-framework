@@ -49,6 +49,7 @@ import type {
   EditorConfiguration,
   ProjectChangePreview,
   ProjectOpenResult,
+  ProjectSourceFile,
   RecentProject,
   WindowState,
   NtSnapshotView,
@@ -752,6 +753,7 @@ export class AppShell extends LitElement {
   @state() private treeSearch = '';
   @state() private treeRowLimit = 250;
   @state() private expandedEntityIds = new Set<string>();
+  @state() private expandedSourcePaths = new Set<string>();
   @state() private selectedEntityId: string | undefined;
   @state() private selectedSourcePath: string | undefined;
   @state() private preview: ProjectChangePreview | undefined;
@@ -911,8 +913,7 @@ export class AppShell extends LitElement {
             .filter(
               (event) =>
                 !event.conflict &&
-                event.path.endsWith('.java') &&
-                sourceOwnership.get(event.path) !== 'managed',
+                (!event.path.endsWith('.java') || sourceOwnership.get(event.path) !== 'managed'),
             )
             .map((event) => event.path)
         : [];
@@ -923,7 +924,10 @@ export class AppShell extends LitElement {
           paths: automaticallyAccepted,
         });
         if (result.project !== undefined) this.project = result.project;
-      } else if (this.externalChanges.some((event) => event.path.endsWith('.java'))) {
+      } else if (
+        this.preview === undefined &&
+        this.externalChanges.some((event) => event.path.endsWith('.java'))
+      ) {
         this.project = await window.framework.project.refresh();
       }
       if (this.project !== undefined) {
@@ -952,7 +956,9 @@ export class AppShell extends LitElement {
       this.treeMode === 'logic' ? this.logicTreeRows(model, query) : this.sourceTreeRows(query);
     return html`<section class="tree-panel" aria-label=${t('structured.title')}>
       <div class="tree-toolbar">
-        <md-text-button @click=${() => this.setTreeMode('logic')}
+        <md-text-button
+          @click=${() => this.setTreeMode('logic')}
+          ?disabled=${this.project?.sourceBrowseOnly === true}
           >${t('tree.logic')}</md-text-button
         >
         <md-text-button @click=${() => this.setTreeMode('source')}
@@ -1083,6 +1089,8 @@ export class AppShell extends LitElement {
     hasChildren: boolean,
   ): TemplateResult {
     const kind = 'parameters' in node ? node.kind : node.kind;
+    const model = this.model();
+    const imported = model !== undefined && this.isEntitySourceReadOnly(model, node);
     const expanded = hasChildren && this.expandedEntityIds.has(node.id);
     const implementation =
       'parameters' in node
@@ -1093,7 +1101,7 @@ export class AppShell extends LitElement {
     return html`<div
       class="tree-node-wrap"
       style=${`padding-left:${String(7 + depth * 14)}px`}
-      draggable="true"
+      draggable=${String(!imported)}
       data-entity-id=${node.id}
       @dragstart=${() => (this.draggedEntityId = node.id)}
       @dragover=${(event: DragEvent) => this.allowTreeDrop(event, node.id)}
@@ -1114,7 +1122,9 @@ export class AppShell extends LitElement {
         <md-icon>${hasChildren ? (expanded ? 'expand_more' : 'chevron_right') : ''}</md-icon>
         <md-icon>${icon}</md-icon>
         <span class="tree-node-label">${node.displayName}</span>
-        <span class="tree-badge">${kind}${implementation}</span>
+        <span class="tree-badge"
+          >${kind}${implementation}${imported ? ` · ${this.#i18n.t('structured.importedReadOnly')}` : ''}</span
+        >
       </button>
       <md-icon-button
         aria-label="${this.#i18n.t('tree.more')}"
@@ -1138,25 +1148,78 @@ export class AppShell extends LitElement {
   }
 
   private sourceTreeRows(query: string): readonly TemplateResult[] {
-    return (this.project?.sourceFiles ?? [])
-      .filter((file) => query.length === 0 || file.path.toLowerCase().includes(query))
-      .map(
-        (file) =>
+    const allFiles = this.project?.sourceFiles ?? [];
+    const files =
+      query.length === 0
+        ? allFiles
+        : allFiles.filter(
+            (file) =>
+              file.path.toLowerCase().includes(query) || file.format.toLowerCase().includes(query),
+          );
+    const directories = new Set<string>();
+    for (const file of files) {
+      const segments = file.path.split('/');
+      for (let index = 1; index < segments.length; index += 1) {
+        directories.add(segments.slice(0, index).join('/'));
+      }
+    }
+    const rows: TemplateResult[] = [];
+    const searching = query.length > 0;
+    const visit = (parent: string, depth: number): void => {
+      const prefix = parent.length === 0 ? '' : `${parent}/`;
+      const childDirectories = [...directories]
+        .filter((directory) => {
+          if (!directory.startsWith(prefix)) return false;
+          return !directory.slice(prefix.length).includes('/');
+        })
+        .sort((left, right) => left.localeCompare(right));
+      for (const directory of childDirectories) {
+        const expanded = searching || this.expandedSourcePaths.has(directory);
+        const count = files.filter((file) => file.path.startsWith(`${directory}/`)).length;
+        rows.push(
           html`<button
             class="tree-node"
             role="treeitem"
+            style=${`padding-left:${String(7 + depth * 14)}px`}
+            aria-expanded=${String(expanded)}
+            @click=${() => this.toggleSourceDirectory(directory)}
+          >
+            <md-icon>${expanded ? 'expand_more' : 'chevron_right'}</md-icon>
+            <md-icon>${expanded ? 'folder_open' : 'folder'}</md-icon>
+            <span class="tree-node-label">${directory.split('/').at(-1)}</span>
+            <span class="ownership">${String(count)}</span>
+          </button>`,
+        );
+        if (expanded) visit(directory, depth + 1);
+      }
+      for (const file of files
+        .filter((candidate) => {
+          const slash = candidate.path.lastIndexOf('/');
+          return (slash < 0 ? '' : candidate.path.slice(0, slash)) === parent;
+        })
+        .sort((left, right) => left.path.localeCompare(right.path))) {
+        const label = file.path.split('/').at(-1) ?? file.path;
+        rows.push(
+          html`<button
+            class="tree-node"
+            role="treeitem"
+            style=${`padding-left:${String(7 + depth * 14)}px`}
             ?selected=${this.selectedSourcePath === file.path}
             @click=${() => (this.selectedSourcePath = file.path)}
             @dblclick=${() => this.openSourceFile(file.path)}
           >
             <md-icon></md-icon>
-            <md-icon>description</md-icon>
-            <span class="tree-node-label">${file.path}</span>
+            <md-icon>${this.sourceFileIcon(file)}</md-icon>
+            <span class="tree-node-label">${label}</span>
             <span class="ownership"
-              >${file.ownership}${file.externallyModified ? ' · modified' : ''}${file.problemCount > 0 ? ` · ${String(file.problemCount)} !` : ''}</span
+              >${file.format}${file.externallyModified ? ` · ${this.#i18n.t('tree.modified')}` : ''}${file.problemCount > 0 ? ` · ${String(file.problemCount)} !` : ''}</span
             >
           </button>`,
-      );
+        );
+      }
+    };
+    visit('', 0);
+    return rows;
   }
 
   private renderStructuredWorkspace(): TemplateResult {
@@ -1172,6 +1235,7 @@ export class AppShell extends LitElement {
     if (this.activePage === 'problems') return this.renderProblemsWorkspace(model);
     if (this.activePage === 'docs') return this.renderDocsWorkspace();
     if (this.activePage === 'auto') return this.renderAutoWorkspace(model);
+    const browseOnly = this.project?.sourceBrowseOnly === true;
     const roots = model.subsystems.filter((entry) => entry.parentId === undefined);
     return html`<section class="structured-workspace">
       <div class="workspace-heading">
@@ -1182,27 +1246,34 @@ export class AppShell extends LitElement {
         <div class="actions">
           <md-filled-button
             @click=${this.openSubsystemDialog}
-            ?disabled=${this.project?.needsImportConfirmation === true}
+            ?disabled=${browseOnly || this.project?.needsImportConfirmation === true}
             >${t('structured.addSubsystem')}</md-filled-button
           >
           <md-outlined-button
             @click=${this.openMechanismDialog}
-            ?disabled=${this.selectedSubsystem() === undefined || this.project?.needsImportConfirmation === true}
+            ?disabled=${browseOnly || this.selectedSubsystem() === undefined || this.selectedStructureReadOnly() || this.project?.needsImportConfirmation === true}
             >${t('structured.addMechanism')}</md-outlined-button
           >
           <md-outlined-button
             @click=${this.openDeviceDialog}
-            ?disabled=${this.selectedSubsystem() === undefined || this.project?.needsImportConfirmation === true}
+            ?disabled=${browseOnly || this.selectedSubsystem() === undefined || this.selectedStructureReadOnly() || this.project?.needsImportConfirmation === true}
             >${t('structured.addDevice')}</md-outlined-button
           >
           <md-outlined-button
             @click=${this.openGoalDialog}
-            ?disabled=${this.selectedSubsystem()?.behaviorMode !== 'goal-driven' || this.project?.needsImportConfirmation === true}
+            ?disabled=${browseOnly || this.selectedSubsystem()?.behaviorMode !== 'goal-driven' || this.selectedStructureReadOnly() || this.project?.needsImportConfirmation === true}
             >${t('structured.addGoal')}</md-outlined-button
           >
         </div>
       </div>
       <div class="path">${this.project?.path}</div>
+      ${
+        browseOnly
+          ? html`<div class="workspace-card">
+              <span class="muted">${t('structured.sourceBrowseOnly')}</span>
+            </div>`
+          : nothing
+      }
       ${
         this.project?.needsImportConfirmation === true
           ? html`<div class="workspace-card">
@@ -1283,7 +1354,7 @@ export class AppShell extends LitElement {
         </div>
         <md-filled-button
           @click=${this.openPresetDialog}
-          ?disabled=${this.project?.needsImportConfirmation === true}
+          ?disabled=${this.project?.sourceBrowseOnly === true || this.project?.needsImportConfirmation === true}
           >${t('presets.add')}</md-filled-button
         >
       </div>
@@ -1779,7 +1850,9 @@ export class AppShell extends LitElement {
           <md-outlined-button @click=${() => this.launchExternal('pathplanner')}
             >${t('toolchain.openPathPlanner')}</md-outlined-button
           >
-          <md-filled-button @click=${this.openAutoDialog} ?disabled=${model.commands.length === 0}
+          <md-filled-button
+            @click=${this.openAutoDialog}
+            ?disabled=${this.project?.sourceBrowseOnly === true || model.commands.length === 0}
             >${t('auto.add')}</md-filled-button
           >
         </div>
@@ -1789,25 +1862,35 @@ export class AppShell extends LitElement {
         ${
           model.autos.length === 0
             ? html`<div class="workspace-card">${t('auto.none')}</div>`
-            : model.autos.map(
-                (auto) =>
-                  html`<div class="hierarchy-row">
-                    <span
-                      ><strong>${auto.displayName}</strong><br /><span class="muted"
-                        >${model.commands.find((entry) => entry.id === auto.commandId)?.displayName ?? t('auto.missingCommand')}</span
-                      ></span
-                    >
-                    <span class="row">
-                      <span class="tree-badge">${auto.pathFiles.join(' · ') || 'Command'}</span>
-                      ${auto.pathFiles[0] === undefined ? nothing : html`<md-icon-button aria-label=${t('auto.openPath')} @click=${() => this.openSourceFile(`src/main/deploy/${auto.pathFiles[0] ?? ''}`)}><md-icon>open_in_new</md-icon></md-icon-button>`}
-                      <md-icon-button
-                        aria-label=${t('tree.delete')}
-                        @click=${() => this.removeCollectionEntity('autos', auto.id)}
-                        ><md-icon>delete</md-icon></md-icon-button
-                      >
-                    </span>
-                  </div>`,
-              )
+            : model.autos.map((auto) => {
+                const command = model.commands.find((entry) => entry.id === auto.commandId);
+                const imported = this.isUnmanagedPath(model, command?.javaFile);
+                return html`<div class="hierarchy-row">
+                  <span
+                    ><strong>${auto.displayName}</strong><br /><span class="muted"
+                      >${command?.displayName ?? t('auto.missingCommand')}</span
+                    ></span
+                  >
+                  <span class="row">
+                    <span class="tree-badge">${auto.pathFiles.join(' · ') || 'Command'}</span>
+                    ${auto.pathFiles[0] === undefined ? nothing : html`<md-icon-button aria-label=${t('auto.openPath')} @click=${() => this.openSourceFile(`src/main/deploy/${auto.pathFiles[0] ?? ''}`)}><md-icon>open_in_new</md-icon></md-icon-button>`}
+                    ${
+                      imported
+                        ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>
+                            <md-icon-button
+                              aria-label=${t('inspector.openCode')}
+                              @click=${() => this.openSourceFile(command?.javaFile ?? '')}
+                              ><md-icon>code</md-icon></md-icon-button
+                            >`
+                        : html`<md-icon-button
+                            aria-label=${t('tree.delete')}
+                            @click=${() => this.removeCollectionEntity('autos', auto.id)}
+                            ><md-icon>delete</md-icon></md-icon-button
+                          >`
+                    }
+                  </span>
+                </div>`;
+              })
         }
       </div>
     </section>`;
@@ -1815,37 +1898,45 @@ export class AppShell extends LitElement {
 
   private renderControlsWorkspace(model: FrcProjectModel): TemplateResult {
     const t = (key: TranslationKey) => this.#i18n.t(key);
+    const browseOnly = this.project?.sourceBrowseOnly === true;
     return html`<section class="structured-workspace">
       <div class="workspace-heading">
         <h1>${t('controls.title')}</h1>
         <div class="actions">
-          <md-filled-button @click=${this.openControllerDialog}
+          <md-filled-button @click=${this.openControllerDialog} ?disabled=${browseOnly}
             >${t('controls.addController')}</md-filled-button
           >
           <md-outlined-button
             @click=${this.openBindingDialog}
-            ?disabled=${model.controllers.length === 0 || model.commands.length === 0}
+            ?disabled=${browseOnly || model.controllers.length === 0 || model.commands.length === 0}
             >${t('controls.addBinding')}</md-outlined-button
           >
         </div>
       </div>
       <div class="hierarchy-list">
-        ${model.controllers.map(
-          (controller) =>
-            html`<div class="hierarchy-row">
-              <span
-                >${controller.displayName}${typeof controller.parameters?.layout === 'string' && controller.parameters.layout.length > 0 ? html`<br /><span class="muted">${controller.parameters.layout}</span>` : nothing}</span
-              >
-              <span class="row">
-                <span class="tree-badge">${controller.provider} · USB ${controller.port}</span>
-                <md-icon-button
-                  aria-label=${t('tree.delete')}
-                  @click=${() => this.removeControllerEntity(controller.id)}
-                  ><md-icon>delete</md-icon></md-icon-button
-                >
-              </span>
-            </div>`,
-        )}
+        ${model.controllers.map((controller) => {
+          const imported = model.bindings.some(
+            (binding) =>
+              binding.controllerId === controller.id && binding.codeReference !== undefined,
+          );
+          return html`<div class="hierarchy-row">
+            <span
+              >${controller.displayName}${typeof controller.parameters?.layout === 'string' && controller.parameters.layout.length > 0 ? html`<br /><span class="muted">${controller.parameters.layout}</span>` : nothing}</span
+            >
+            <span class="row">
+              <span class="tree-badge">${controller.provider} · USB ${controller.port}</span>
+              ${
+                imported
+                  ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>`
+                  : html`<md-icon-button
+                      aria-label=${t('tree.delete')}
+                      @click=${() => this.removeControllerEntity(controller.id)}
+                      ><md-icon>delete</md-icon></md-icon-button
+                    >`
+              }
+            </span>
+          </div>`;
+        })}
         ${model.bindings.map((binding) => {
           const controller = model.controllers.find((entry) => entry.id === binding.controllerId);
           const command = model.commands.find((entry) => entry.id === binding.commandId);
@@ -1861,11 +1952,15 @@ export class AppShell extends LitElement {
               >${binding.behavior} → ${command?.displayName ?? 'custom'}</span
             >
             ${binding.behavior !== 'custom' ? nothing : html`<md-icon-button aria-label=${t('inspector.openCode')} @click=${() => this.openSourceFile(command?.javaFile ?? 'src/main/java')}><md-icon>code</md-icon></md-icon-button>`}
-            <md-icon-button
-              aria-label=${t('tree.delete')}
-              @click=${() => this.removeCollectionEntity('bindings', binding.id)}
-              ><md-icon>delete</md-icon></md-icon-button
-            >
+            ${
+              binding.codeReference === undefined
+                ? html`<md-icon-button
+                    aria-label=${t('tree.delete')}
+                    @click=${() => this.removeCollectionEntity('bindings', binding.id)}
+                    ><md-icon>delete</md-icon></md-icon-button
+                  >`
+                : html`<span class="ownership">${t('structured.importedReadOnly')}</span>`
+            }
           </div>`;
         })}
       </div>
@@ -1877,10 +1972,15 @@ export class AppShell extends LitElement {
     return html`<section class="structured-workspace">
       <div class="workspace-heading">
         <h1>${t('commands.title')}</h1>
-        <md-filled-button @click=${this.openCommandDialog}>${t('commands.add')}</md-filled-button>
+        <md-filled-button
+          @click=${this.openCommandDialog}
+          ?disabled=${this.project?.sourceBrowseOnly === true}
+          >${t('commands.add')}</md-filled-button
+        >
       </div>
       <div class="hierarchy-list">
         ${model.commands.map((command) => {
+          const imported = this.isUnmanagedPath(model, command.javaFile);
           const requirements = command.requirementIds
             .map((id) => model.subsystems.find((entry) => entry.id === id)?.displayName ?? '?')
             .join(', ');
@@ -1896,11 +1996,20 @@ export class AppShell extends LitElement {
                 >${command.kind} ·
                 ${command.factory === false ? t('commands.instance') : t('commands.factory')}${command.pathplannerName === undefined ? '' : ` · PathPlanner: ${command.pathplannerName}`}</span
               >
-              <md-icon-button
-                aria-label=${t('tree.delete')}
-                @click=${() => this.removeCommand(command.id)}
-                ><md-icon>delete</md-icon></md-icon-button
-              >
+              ${
+                imported
+                  ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>
+                      <md-icon-button
+                        aria-label=${t('inspector.openCode')}
+                        @click=${() => this.openSourceFile(command.javaFile ?? '')}
+                        ><md-icon>code</md-icon></md-icon-button
+                      >`
+                  : html`<md-icon-button
+                      aria-label=${t('tree.delete')}
+                      @click=${() => this.removeCommand(command.id)}
+                      ><md-icon>delete</md-icon></md-icon-button
+                    >`
+              }
             </span>
           </div>`;
         })}
@@ -1919,43 +2028,69 @@ export class AppShell extends LitElement {
       return html`
         <section class="inspector-section">
           <span class="path">${this.selectedSourcePath}</span>
+          ${
+            source === undefined
+              ? nothing
+              : html`<div class="row">
+                    <span class="tree-badge">${source.format}</span>
+                    <span class="muted">${formatFileSize(source.size)}</span>
+                  </div>
+                  <div class="row">
+                    <span class="ownership">${source.ownership}</span>
+                    ${source.binary ? html`<span class="tree-badge">${t('tree.binary')}</span>` : nothing}
+                  </div>`
+          }
           <md-outlined-button @click=${() => this.openSourceFile(this.selectedSourcePath ?? '')}
             >${t('inspector.openCode')}</md-outlined-button
           >
+          ${
+            source?.binary !== true
+              ? nothing
+              : html`<span class="muted">${t('inspector.binaryFileHint')}</span>`
+          }
         </section>
-        <section class="inspector-section">
-          <span class="muted">${t('inspector.indexedSymbols')}</span>
-          ${(source?.symbols ?? []).map(
-            (symbol) =>
-              html`<button
-                class="hierarchy-row"
-                @click=${() => this.openSourceFile(source?.path ?? '', symbol.line, symbol.column)}
-              >
-                <span>${symbol.label}</span
-                ><span class="tree-badge"
-                  >${symbol.kind} · ${String(symbol.line)}:${String(symbol.column)}</span
+        ${
+          (source?.symbols?.length ?? 0) === 0
+            ? nothing
+            : html`<section class="inspector-section">
+                <span class="muted">${t('inspector.indexedSymbols')}</span>
+                ${(source?.symbols ?? []).map(
+                  (symbol) =>
+                    html`<button
+                      class="hierarchy-row"
+                      @click=${() => this.openSourceFile(source?.path ?? '', symbol.line, symbol.column)}
+                    >
+                      <span>${symbol.label}</span
+                      ><span class="tree-badge"
+                        >${symbol.kind} · ${String(symbol.line)}:${String(symbol.column)}</span
+                      >
+                    </button>`,
+                )}
+              </section>`
+        }
+        ${
+          source?.kind !== 'java'
+            ? nothing
+            : html`<section class="inspector-section">
+                <span class="muted">${t('inspector.javaActions')}</span>
+                <md-outlined-text-field
+                  label=${t('inspector.importName')}
+                  .value=${this.importName}
+                  @input=${(event: Event) => (this.importName = inputValue(event))}
+                ></md-outlined-text-field>
+                <label class="control-row"
+                  ><md-checkbox
+                    aria-label=${t('inspector.staticImport')}
+                    ?checked=${this.importStatic}
+                    @change=${(event: Event) => (this.importStatic = (event.target as HTMLInputElement).checked)}
+                  ></md-checkbox
+                  ><span>${t('inspector.staticImport')}</span></label
                 >
-              </button>`,
-          )}
-        </section>
-        <section class="inspector-section">
-          <md-outlined-text-field
-            label=${t('inspector.importName')}
-            .value=${this.importName}
-            @input=${(event: Event) => (this.importName = inputValue(event))}
-          ></md-outlined-text-field>
-          <label class="control-row"
-            ><md-checkbox
-              aria-label=${t('inspector.staticImport')}
-              ?checked=${this.importStatic}
-              @change=${(event: Event) => (this.importStatic = (event.target as HTMLInputElement).checked)}
-            ></md-checkbox
-            ><span>${t('inspector.staticImport')}</span></label
-          >
-          <md-filled-button @click=${this.addJavaImport}
-            >${t('inspector.addImport')}</md-filled-button
-          >
-        </section>
+                <md-filled-button @click=${this.addJavaImport}
+                  >${t('inspector.addImport')}</md-filled-button
+                >
+              </section>`
+        }
       `;
     }
     if (model === undefined || selected === undefined) {
@@ -1968,6 +2103,7 @@ export class AppShell extends LitElement {
       (entry) => entry.parentId === undefined && entry.id !== selected.id,
     );
     const runtimeFile = subsystemJavaLocation(model, selected).file;
+    const imported = this.isEntitySourceReadOnly(model, selected);
     const hasGeneratedConfig =
       selected.symbol === 'SwerveSubsystem' ||
       model.devices.some(
@@ -1983,14 +2119,22 @@ export class AppShell extends LitElement {
     return html`
       <section class="inspector-section">
         <span class="muted">${selected.kind}</span>
+        ${
+          imported
+            ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>
+                <span class="muted">${t('structured.importedReadOnlyHint')}</span>`
+            : nothing
+        }
         <md-outlined-text-field
           label=${t('structured.name')}
           .value=${selected.displayName}
+          ?disabled=${imported}
           @change=${(event: Event) => this.renameSelected(inputValue(event), selected.symbol)}
         ></md-outlined-text-field>
         <md-outlined-text-field
           label=${t('structured.symbol')}
           .value=${selected.symbol}
+          ?disabled=${imported}
           @change=${(event: Event) => this.renameSelected(selected.displayName, inputValue(event))}
         ></md-outlined-text-field>
       </section>
@@ -1998,6 +2142,7 @@ export class AppShell extends LitElement {
         <span class="muted">${t('structured.behavior')}</span>
         <md-outlined-select
           .value=${selected.behaviorMode ?? 'direct'}
+          ?disabled=${imported}
           @change=${(event: Event) => this.changeSubsystemBehavior(selected, inputValue(event) as NonNullable<Subsystem['behaviorMode']>)}
         >
           ${['direct', 'goal-driven', 'custom'].map((mode) => html`<md-select-option value=${mode}><div slot="headline">${mode}</div></md-select-option>`)}
@@ -2010,6 +2155,7 @@ export class AppShell extends LitElement {
                   ><md-switch
                     aria-label=${t('structured.goalCommand')}
                     ?selected=${selected.generateGoalCommand !== false}
+                    ?disabled=${imported}
                     @change=${(event: Event) => this.updateSubsystemScaffold(selected, { generateGoalCommand: (event.target as HTMLElement & { selected: boolean }).selected })}
                   ></md-switch
                   ><span>${t('structured.goalCommand')}</span></label
@@ -2018,6 +2164,7 @@ export class AppShell extends LitElement {
                   ><md-switch
                     aria-label=${t('structured.goalLogging')}
                     ?selected=${selected.advantageKitLogging === true}
+                    ?disabled=${imported}
                     @change=${(event: Event) => this.updateSubsystemScaffold(selected, { advantageKitLogging: (event.target as HTMLElement & { selected: boolean }).selected })}
                   ></md-switch
                   ><span>${t('structured.goalLogging')}</span></label
@@ -2033,6 +2180,7 @@ export class AppShell extends LitElement {
                         >
                         <md-icon-button
                           aria-label=${`${t('tree.delete')} ${goal.displayName}`}
+                          ?disabled=${imported}
                           @click=${() => this.removeGoal(selected, goal.id)}
                           ><md-icon>delete</md-icon></md-icon-button
                         >
@@ -2060,6 +2208,7 @@ export class AppShell extends LitElement {
             >
             <md-icon-button
               aria-label=${`${t('tree.delete')} ${dependency.fieldName}`}
+              ?disabled=${imported}
               @click=${() => this.removeSubsystemReference(selected, dependency.targetSubsystemId)}
               ><md-icon>delete</md-icon></md-icon-button
             >
@@ -2070,6 +2219,7 @@ export class AppShell extends LitElement {
             ? nothing
             : html`<md-outlined-select
                 label=${t('inspector.addReference')}
+                ?disabled=${imported}
                 @change=${(event: Event) => this.prepareSubsystemReference(selected, inputValue(event))}
               >
                 ${referenceTargets.map((target) => html`<md-select-option value=${target.id}><div slot="headline">${target.displayName}</div></md-select-option>`)}
@@ -2081,6 +2231,8 @@ export class AppShell extends LitElement {
 
   private renderDeviceInspector(device: Device): TemplateResult {
     const t = (key: TranslationKey) => this.#i18n.t(key);
+    const model = this.model();
+    const imported = model !== undefined && this.isEntitySourceReadOnly(model, device);
     const definition =
       device.catalogId === undefined ? undefined : findComponentDefinition(device.catalogId);
     const existingKeys = new Set(device.parameters.map((parameter) => parameter.key));
@@ -2089,6 +2241,12 @@ export class AppShell extends LitElement {
     return html`
       <section class="inspector-section">
         <span class="muted">${t('inspector.catalogType')}</span>
+        ${
+          imported
+            ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>
+                <span class="muted">${t('structured.importedReadOnlyHint')}</span>`
+            : nothing
+        }
         <strong>${definition?.displayName ?? `${device.vendor} ${device.model}`}</strong>
         ${definition === undefined ? nothing : html`<span class="muted">${definition.description}</span>`}
         ${definition === undefined ? nothing : html`<span class="path">Real: ${definition.realClass}<br />Sim: ${definition.simClass}</span>`}
@@ -2120,12 +2278,14 @@ export class AppShell extends LitElement {
                         ? html`<md-switch
                             aria-label=${parameter.displayName}
                             ?selected=${parameter.value === true}
+                            ?disabled=${imported}
                             @change=${(event: Event) => this.updateParameter(device, parameter.key, (event.target as HTMLElement & { selected: boolean }).selected)}
                           ></md-switch>`
                         : parameter.type === 'enum'
                           ? html`<md-outlined-select
                               aria-label=${parameter.displayName}
                               .value=${String(parameter.value)}
+                              ?disabled=${imported}
                               @change=${(event: Event) => this.updateParameter(device, parameter.key, inputValue(event))}
                             >
                               ${(parameter.enumValues ?? []).map(
@@ -2138,6 +2298,7 @@ export class AppShell extends LitElement {
                           : html`<md-outlined-text-field
                               aria-label=${parameter.displayName}
                               .value=${this.parameterText(parameter.value)}
+                              ?disabled=${imported}
                               placeholder=${parameter.key === 'setpoints' ? 'HOME=0, SPEAKER=85' : ''}
                               @change=${(event: Event) => this.updateParameter(device, parameter.key, this.parseParameterValue(parameter.type, inputValue(event)))}
                             ></md-outlined-text-field>`
@@ -2145,6 +2306,7 @@ export class AppShell extends LitElement {
                     <md-filter-chip
                       label=${t('inspector.ntChipLabel')}
                       ?selected=${ntEnabled}
+                      ?disabled=${imported}
                       aria-label=${ntEnabled ? t('inspector.ntEnabled') : t('inspector.ntDisabled')}
                       @click=${() => this.toggleParameterNt(device, parameter.key)}
                     ></md-filter-chip>
@@ -2153,6 +2315,7 @@ export class AppShell extends LitElement {
                         ? nothing
                         : html`<md-icon-button
                             aria-label=${`${t('tree.delete')} ${parameter.displayName}`}
+                            ?disabled=${imported}
                             @click=${() => this.removeOptionalParameter(device, parameter.key)}
                             ><md-icon>delete</md-icon></md-icon-button
                           >`
@@ -2172,6 +2335,7 @@ export class AppShell extends LitElement {
             ? nothing
             : html`<md-outlined-select
                 label=${t('inspector.addParameter')}
+                ?disabled=${imported}
                 @change=${(event: Event) => this.addOptionalParameter(device, inputValue(event))}
               >
                 ${optional.map((parameter) => html`<md-select-option value=${parameter.key}><div slot="headline">${parameter.displayName}</div></md-select-option>`)}
@@ -3737,6 +3901,79 @@ export class AppShell extends LitElement {
       : selected;
   }
 
+  private isUnmanagedPath(model: FrcProjectModel, filePath: string | undefined): boolean {
+    if (filePath === undefined) return false;
+    const normalized = filePath.replace(/\\/gu, '/');
+    return model.unmanagedFiles.some((entry) => entry.replace(/\\/gu, '/') === normalized);
+  }
+
+  private isSubsystemSourceReadOnly(model: FrcProjectModel, subsystem: Subsystem): boolean {
+    const byId = new Map(model.subsystems.map((entry) => [entry.id, entry]));
+    let cursor: Subsystem | undefined = subsystem;
+    while (cursor !== undefined) {
+      if (this.isUnmanagedPath(model, cursor.javaFile)) return true;
+      cursor = cursor.parentId === undefined ? undefined : byId.get(cursor.parentId);
+    }
+    if (subsystem.javaFile === undefined) {
+      const descendants = new Set([subsystem.id]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const candidate of model.subsystems) {
+          if (
+            candidate.parentId !== undefined &&
+            descendants.has(candidate.parentId) &&
+            !descendants.has(candidate.id)
+          ) {
+            descendants.add(candidate.id);
+            changed = true;
+          }
+        }
+      }
+      return model.subsystems.some(
+        (candidate) =>
+          descendants.has(candidate.id) && this.isUnmanagedPath(model, candidate.javaFile),
+      );
+    }
+    return false;
+  }
+
+  private isEntitySourceReadOnly(model: FrcProjectModel, entity: Subsystem | Device): boolean {
+    const subsystem =
+      'parameters' in entity
+        ? model.subsystems.find((entry) => entry.id === entity.parentId)
+        : entity;
+    return subsystem !== undefined && this.isSubsystemSourceReadOnly(model, subsystem);
+  }
+
+  private selectedStructureReadOnly(): boolean {
+    const model = this.model();
+    const selected = this.selectedEntity();
+    return model !== undefined && selected !== undefined
+      ? this.isEntitySourceReadOnly(model, selected)
+      : false;
+  }
+
+  private revealEntityInTree(model: FrcProjectModel, entityId: string): void {
+    const expanded = new Set(this.expandedEntityIds);
+    expanded.add(model.robot.id);
+    const subsystemById = new Map(model.subsystems.map((entry) => [entry.id, entry]));
+    let subsystem = subsystemById.get(entityId);
+    const device = model.devices.find((entry) => entry.id === entityId);
+    subsystem ??= device === undefined ? undefined : subsystemById.get(device.parentId);
+    const visited = new Set<string>();
+    while (subsystem !== undefined && !visited.has(subsystem.id)) {
+      visited.add(subsystem.id);
+      expanded.add(subsystem.id);
+      subsystem =
+        subsystem.parentId === undefined ? undefined : subsystemById.get(subsystem.parentId);
+    }
+    this.treeMode = 'logic';
+    this.treeSearch = '';
+    this.expandedEntityIds = expanded;
+    this.selectedEntityId = entityId;
+  }
+
   private readonly openSubsystemDialog = (): void => {
     const model = this.model();
     this.subsystemName = '';
@@ -3747,6 +3984,10 @@ export class AppShell extends LitElement {
   };
 
   private readonly openMechanismDialog = (): void => {
+    if (this.selectedStructureReadOnly()) {
+      this.notice = this.#i18n.t('structured.importedReadOnlyHint');
+      return;
+    }
     this.mechanismName = '';
     this.mechanismSymbol = '';
     this.mechanismNotes = '';
@@ -3754,6 +3995,10 @@ export class AppShell extends LitElement {
   };
 
   private readonly openDeviceDialog = (): void => {
+    if (this.selectedStructureReadOnly()) {
+      this.notice = this.#i18n.t('structured.importedReadOnlyHint');
+      return;
+    }
     this.deviceName = '';
     this.deviceCanId = '0';
     this.deviceCanBus = 'rio';
@@ -3763,6 +4008,10 @@ export class AppShell extends LitElement {
   };
 
   private readonly openGoalDialog = (): void => {
+    if (this.selectedStructureReadOnly()) {
+      this.notice = this.#i18n.t('structured.importedReadOnlyHint');
+      return;
+    }
     this.goalName = '';
     this.dialog('goal-dialog')?.show();
   };
@@ -3908,6 +4157,11 @@ export class AppShell extends LitElement {
                 setpointUnit: this.commonPresetUnit.trim(),
               });
       this.dialog('preset-dialog')?.close();
+      const previousSubsystemIds = new Set(model.subsystems.map((entry) => entry.id));
+      const createdSubsystem = next.subsystems.find(
+        (subsystem) => !previousSubsystemIds.has(subsystem.id),
+      );
+      if (createdSubsystem !== undefined) this.revealEntityInTree(next, createdSubsystem.id);
       await this.previewCommand({
         changes: {
           devices: next.devices,
@@ -3917,6 +4171,10 @@ export class AppShell extends LitElement {
         target: { scope: 'model' },
         type: 'update',
       });
+      if (createdSubsystem !== undefined) {
+        this.revealEntityInTree(next, createdSubsystem.id);
+        void this.saveTreeState();
+      }
     } catch (error) {
       this.showError(error);
     }
@@ -4414,10 +4672,33 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   private readonly addMechanism = async (): Promise<void> => {
     const parent = this.selectedSubsystem();
     const name = this.mechanismName.trim();
-    if (parent === undefined || name.length === 0) return;
+    const model = this.model();
+    if (
+      parent === undefined ||
+      model === undefined ||
+      this.isSubsystemSourceReadOnly(model, parent) ||
+      name.length === 0
+    )
+      return;
     const id = createEntityId();
     this.dialog('mechanism-dialog')?.close();
-    this.selectedEntityId = id;
+    this.revealEntityInTree(
+      {
+        ...model,
+        subsystems: [
+          ...model.subsystems,
+          {
+            behaviorMode: 'direct',
+            displayName: name,
+            id,
+            kind: 'mechanism',
+            parentId: parent.id,
+            symbol: this.mechanismSymbol.trim() || javaSymbol(name),
+          },
+        ],
+      },
+      id,
+    );
     await this.previewCommand({
       collection: 'subsystems',
       entity: {
@@ -4435,9 +4716,17 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
 
   private readonly addDevice = async (): Promise<void> => {
     const parent = this.selectedSubsystem();
+    const model = this.model();
     const definition = findComponentDefinition(this.deviceCatalogId);
     const name = this.deviceName.trim();
-    if (parent === undefined || definition === undefined || name.length === 0) return;
+    if (
+      parent === undefined ||
+      model === undefined ||
+      this.isSubsystemSourceReadOnly(model, parent) ||
+      definition === undefined ||
+      name.length === 0
+    )
+      return;
     const canDevice = ['motor', 'encoder', 'gyro'].includes(definition.domainKind);
     const values: Record<string, string | number | boolean> = {};
     if (!canDevice && definition.role !== 'mechanism') values.channel = Number(this.deviceCanId);
@@ -4455,16 +4744,24 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       values,
     });
     this.dialog('device-dialog')?.close();
-    this.selectedEntityId = device.id;
+    this.revealEntityInTree({ ...model, devices: [...model.devices, device] }, device.id);
     await this.previewCommand({ collection: 'devices', entity: device, type: 'add' });
   };
 
   private readonly addGoal = async (): Promise<void> => {
     const subsystem = this.selectedSubsystem();
+    const model = this.model();
     const name = this.goalName.trim();
-    if (subsystem === undefined || name.length === 0) return;
+    if (
+      subsystem === undefined ||
+      model === undefined ||
+      this.isSubsystemSourceReadOnly(model, subsystem) ||
+      name.length === 0
+    )
+      return;
     const stateMachine = subsystem.stateMachine ?? { states: [], transitions: [] };
     this.dialog('goal-dialog')?.close();
+    this.revealEntityInTree(model, subsystem.id);
     await this.previewCommand({
       changes: {
         behaviorMode: 'goal-driven',
@@ -4488,6 +4785,8 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   };
 
   private async removeGoal(subsystem: Subsystem, stateId: string): Promise<void> {
+    const model = this.model();
+    if (model === undefined || this.isSubsystemSourceReadOnly(model, subsystem)) return;
     const updated = removeSubsystemState(subsystem, stateId);
     await this.previewCommand({
       changes: { stateMachine: updated.stateMachine },
@@ -4588,7 +4887,13 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
 
   private async renameSelected(displayName: string, symbol: string): Promise<void> {
     const selected = this.selectedEntity();
-    if (selected === undefined) return;
+    const model = this.model();
+    if (
+      selected === undefined ||
+      model === undefined ||
+      this.isEntitySourceReadOnly(model, selected)
+    )
+      return;
     await this.previewCommand({
       collection: 'parameters' in selected ? 'devices' : 'subsystems',
       displayName,
@@ -4602,6 +4907,8 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     subsystem: Subsystem,
     behaviorMode: NonNullable<Subsystem['behaviorMode']>,
   ): Promise<void> {
+    const model = this.model();
+    if (model === undefined || this.isSubsystemSourceReadOnly(model, subsystem)) return;
     const stateMachine =
       behaviorMode === 'goal-driven'
         ? (subsystem.stateMachine ?? {
@@ -4634,6 +4941,8 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     subsystem: Subsystem,
     changes: Pick<Subsystem, 'generateGoalCommand' | 'advantageKitLogging'>,
   ): Promise<void> {
+    const model = this.model();
+    if (model === undefined || this.isSubsystemSourceReadOnly(model, subsystem)) return;
     await this.previewCommand({
       changes,
       target: { collection: 'subsystems', id: subsystem.id, scope: 'entity' },
@@ -4664,6 +4973,8 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     key: string,
     value: Device['parameters'][number]['value'],
   ): Promise<void> {
+    const model = this.model();
+    if (model === undefined || this.isEntitySourceReadOnly(model, device)) return;
     const parameters = device.parameters.map((parameter) =>
       parameter.key === key ? { ...parameter, source: 'user' as const, value } : parameter,
     );
@@ -4675,6 +4986,8 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   }
 
   private async removeOptionalParameter(device: Device, key: string): Promise<void> {
+    const model = this.model();
+    if (model === undefined || this.isEntitySourceReadOnly(model, device)) return;
     const definition =
       device.catalogId === undefined ? undefined : findComponentDefinition(device.catalogId);
     if (definition?.parameters.find((parameter) => parameter.key === key)?.required === true)
@@ -4687,6 +5000,8 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   }
 
   private async toggleParameterNt(device: Device, key: string): Promise<void> {
+    const model = this.model();
+    if (model === undefined || this.isEntitySourceReadOnly(model, device)) return;
     const parameters = device.parameters.map((parameter) =>
       parameter.key === key
         ? {
@@ -4709,6 +5024,8 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   }
 
   private async addOptionalParameter(device: Device, key: string): Promise<void> {
+    const model = this.model();
+    if (model === undefined || this.isEntitySourceReadOnly(model, device)) return;
     const definition =
       device.catalogId === undefined ? undefined : findComponentDefinition(device.catalogId);
     const catalogParameter = definition?.parameters.find((parameter) => parameter.key === key);
@@ -4744,8 +5061,14 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   }
 
   private async addSubsystemReference(subsystem: Subsystem, targetId: string): Promise<void> {
-    const target = this.model()?.subsystems.find((entry) => entry.id === targetId);
-    if (target === undefined) return;
+    const model = this.model();
+    const target = model?.subsystems.find((entry) => entry.id === targetId);
+    if (
+      model === undefined ||
+      target === undefined ||
+      this.isSubsystemSourceReadOnly(model, subsystem)
+    )
+      return;
     const dependencies = [
       ...(subsystem.dependencies ?? []).filter(
         (dependency) => dependency.targetSubsystemId !== targetId,
@@ -4766,6 +5089,8 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     subsystem: Subsystem,
     targetSubsystemId: string,
   ): Promise<void> {
+    const model = this.model();
+    if (model === undefined || this.isSubsystemSourceReadOnly(model, subsystem)) return;
     await this.previewCommand({
       changes: {
         dependencies: (subsystem.dependencies ?? []).filter(
@@ -4800,6 +5125,11 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   private async removeCommand(commandId: string): Promise<void> {
     const model = this.model();
     if (model === undefined) return;
+    const command = model.commands.find((entry) => entry.id === commandId);
+    if (this.isUnmanagedPath(model, command?.javaFile)) {
+      this.notice = this.#i18n.t('structured.importedReadOnlyHint');
+      return;
+    }
     await this.previewCommand({
       changes: {
         autos: model.autos.filter((auto) => auto.commandId !== commandId),
@@ -5045,10 +5375,38 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   }
 
   private readonly setTreeMode = (mode: 'logic' | 'source'): void => {
+    if (mode !== this.treeMode) this.treeSearch = '';
     this.treeMode = mode;
     this.treeRowLimit = 250;
     void this.saveTreeState();
   };
+
+  private toggleSourceDirectory(directory: string): void {
+    const next = new Set(this.expandedSourcePaths);
+    if (next.has(directory)) next.delete(directory);
+    else next.add(directory);
+    this.expandedSourcePaths = next;
+    void this.saveTreeState();
+  }
+
+  private sourceFileIcon(file: ProjectSourceFile): string {
+    if (file.binary) return file.kind === 'asset' ? 'view_in_ar' : 'data_object';
+    return (
+      {
+        asset: 'image',
+        configuration: 'settings',
+        cpp: 'code',
+        documentation: 'description',
+        gradle: 'build',
+        java: 'coffee',
+        kotlin: 'code',
+        log: 'monitoring',
+        pathplanner: 'route',
+        script: 'terminal',
+        text: 'article',
+      } satisfies Record<ProjectSourceFile['kind'], string>
+    )[file.kind];
+  }
 
   private toggleTreeNode(id: string): void {
     const next = new Set(this.expandedEntityIds);
@@ -5060,7 +5418,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
 
   private restoreTreeState(project: ProjectOpenResult): void {
     const saved = this.settings.projectUi[project.path];
-    this.treeMode = saved?.treeMode ?? 'logic';
+    this.treeMode = project.sourceBrowseOnly === true ? 'source' : (saved?.treeMode ?? 'logic');
     this.expandedEntityIds = new Set(
       saved?.expandedEntityIds ?? [
         ...(project.model === undefined ? [] : [project.model.robot.id]),
@@ -5069,6 +5427,15 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
           .map((entry) => entry.id) ?? []),
       ],
     );
+    this.expandedSourcePaths = new Set(
+      saved?.expandedSourcePaths ?? defaultExpandedSourcePaths(project.sourceFiles),
+    );
+    if (
+      this.selectedSourcePath !== undefined &&
+      !project.sourceFiles.some((file) => file.path === this.selectedSourcePath)
+    ) {
+      this.selectedSourcePath = undefined;
+    }
   }
 
   private async saveTreeState(): Promise<void> {
@@ -5079,6 +5446,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
         ...this.settings.projectUi,
         [projectPath]: {
           expandedEntityIds: [...this.expandedEntityIds].sort(),
+          expandedSourcePaths: [...this.expandedSourcePaths].sort(),
           treeMode: this.treeMode,
         },
       },
@@ -5114,6 +5482,11 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     const subsystem = model?.subsystems.find((entry) => entry.id === this.selectedEntityId);
     if (model === undefined || (device === undefined && subsystem === undefined)) {
       this.notice = this.#i18n.t('tree.deleteDeviceOnly');
+      return;
+    }
+    const selected = subsystem ?? device;
+    if (selected !== undefined && this.isEntitySourceReadOnly(model, selected)) {
+      this.notice = this.#i18n.t('structured.importedReadOnlyHint');
       return;
     }
     if (subsystem !== undefined) {
@@ -5245,9 +5618,13 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     if (draggedId === undefined || draggedId === targetId || model === undefined) return false;
     const target = model.subsystems.find((entry) => entry.id === targetId);
     if (target === undefined) return false;
+    if (this.isSubsystemSourceReadOnly(model, target)) return false;
     const draggedSubsystem = model.subsystems.find((entry) => entry.id === draggedId);
-    if (draggedSubsystem === undefined)
-      return model.devices.some((entry) => entry.id === draggedId);
+    if (draggedSubsystem === undefined) {
+      const draggedDevice = model.devices.find((entry) => entry.id === draggedId);
+      return draggedDevice !== undefined && !this.isEntitySourceReadOnly(model, draggedDevice);
+    }
+    if (this.isSubsystemSourceReadOnly(model, draggedSubsystem)) return false;
     let cursor: Subsystem | undefined = target;
     while (cursor !== undefined) {
       if (cursor.id === draggedSubsystem.id) return false;
@@ -5676,6 +6053,24 @@ const CHINESE_PARAMETER_DESCRIPTIONS: Readonly<Record<string, string>> = {
   zeroingCurrent: '归零碰到机械止挡时用于确认到位的电流阈值。',
   zeroingVoltage: '归零时朝基准方向施加的低电压。',
 };
+
+function defaultExpandedSourcePaths(files: readonly ProjectSourceFile[]): readonly string[] {
+  const expanded = new Set<string>();
+  for (const file of files) {
+    const segments = file.path.split('/');
+    for (let index = 1; index < segments.length; index += 1) {
+      const directory = segments.slice(0, index).join('/');
+      if (index === 1 || (segments[0] === 'src' && index <= 3)) expanded.add(directory);
+    }
+  }
+  return [...expanded].sort();
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1_024) return `${String(bytes)} B`;
+  if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(1)} KB`;
+  return `${(bytes / 1_048_576).toFixed(1)} MB`;
+}
 
 function inputValue(event: Event): string {
   return (event.target as HTMLInputElement).value;

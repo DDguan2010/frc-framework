@@ -102,6 +102,71 @@ describe('JavaProjectIndexer', () => {
     expect(report.files[0]?.path).toContain('Arm.java');
   });
 
+  it('recognizes handwritten subsystem inheritance, state goals, command classes, and HID ports', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-handwritten-'));
+    const subsystemSource = path.join(root, 'src/main/java/frc/robot/subsystems/Arm');
+    const commandSource = path.join(root, 'src/main/java/frc/robot/commands');
+    await mkdir(subsystemSource, { recursive: true });
+    await mkdir(commandSource, { recursive: true });
+    await writeFile(
+      path.join(subsystemSource, 'ArmSubsystem.java'),
+      `package frc.robot.subsystems.Arm;
+       import edu.wpi.first.wpilibj2.command.SubsystemBase;
+       public final class ArmSubsystem extends SubsystemBase {
+         enum Goal { STOW, INTAKE, SCORE }
+       }`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(subsystemSource, 'ShotCalculator.java'),
+      'package frc.robot.subsystems.Arm; public final class ShotCalculator {}',
+      'utf8',
+    );
+    await writeFile(
+      path.join(commandSource, 'ScoreCommand.java'),
+      `package frc.robot.commands;
+       import edu.wpi.first.wpilibj2.command.Command;
+       public final class ScoreCommand implements Command {}`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(root, 'src/main/java/frc/robot/RobotContainer.java'),
+      `package frc.robot;
+       import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+       public final class RobotContainer {
+         private final CommandXboxController operator = new CommandXboxController(4);
+       }`,
+      'utf8',
+    );
+
+    const indexer = await JavaProjectIndexer.create();
+    indexers.push(indexer);
+    const report = await indexer.indexProject(root);
+    const arm = report.model.subsystems.find((entry) => entry.symbol === 'ArmSubsystem');
+    expect(arm?.stateMachine?.states.map((state) => state.symbol)).toEqual([
+      'STOW',
+      'INTAKE',
+      'SCORE',
+    ]);
+    expect(arm?.behaviorMode).toBe('goal-driven');
+    expect(report.model.subsystems.some((entry) => entry.symbol === 'ShotCalculator')).toBe(false);
+    expect(report.model.commands).toEqual([
+      expect.objectContaining({
+        factory: false,
+        javaFile: 'src/main/java/frc/robot/commands/ScoreCommand.java',
+        symbol: 'ScoreCommand',
+      }),
+    ]);
+    expect(report.model.controllers[0]?.port).toBe(4);
+    expect(report.model.unmanagedFiles).toEqual(
+      expect.arrayContaining([
+        'src/main/java/frc/robot/RobotContainer.java',
+        'src/main/java/frc/robot/commands/ScoreCommand.java',
+        'src/main/java/frc/robot/subsystems/Arm/ArmSubsystem.java',
+      ]),
+    );
+  });
+
   it('recovers an arbitrarily deep generated subsystem tree from Java paths', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-nested-import-'));
     const source = path.join(root, 'src/main/java/frc/robot/subsystems/intake');

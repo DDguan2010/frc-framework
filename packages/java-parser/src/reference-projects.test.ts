@@ -65,14 +65,18 @@ describe.runIf(referencesAvailable)('local reference robot projects', () => {
         subsystems: report.model.subsystems.length,
       }).toEqual({
         bindings: 20,
-        commands: 122,
+        commands: 125,
         controllers: 2,
         customFiles: 86,
         files: 127,
         partialFiles: 0,
-        subsystems: 7,
+        subsystems: 6,
       });
       expect(report.model.subsystems.some((entry) => entry.displayName === 'Shooter')).toBe(true);
+      expect(report.model.subsystems.some((entry) => entry.symbol === 'ShotCalculator')).toBe(
+        false,
+      );
+      expect(report.model.commands.some((entry) => entry.symbol === 'AutoAimCommand')).toBe(true);
       expect(report.model.subsystems.some((entry) => entry.symbol.endsWith('Config'))).toBe(false);
       expect(report.model.controllers.length).toBeGreaterThanOrEqual(2);
       expect(report.model.bindings.length).toBeGreaterThan(10);

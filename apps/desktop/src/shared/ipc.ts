@@ -1,5 +1,5 @@
 import type { AppInfo, DomainCommand, FrcProjectModel } from '@frc-framework/domain';
-import type { FileChange } from '@frc-framework/project-io';
+import type { FileChange, ProjectFileKind } from '@frc-framework/project-io';
 import type { NtConnectionState, NtType, NtValue } from '@frc-framework/nt-client';
 import type { GradleDiagnostic, JavaCandidate } from '@frc-framework/toolchain';
 
@@ -90,6 +90,7 @@ export interface DefaultProjectSettings {
 export interface ProjectWorkspaceState {
   readonly treeMode: 'logic' | 'source';
   readonly expandedEntityIds: readonly string[];
+  readonly expandedSourcePaths?: readonly string[];
 }
 
 export interface AppSettings {
@@ -148,6 +149,7 @@ export interface ProjectOpenResult {
   readonly problems: readonly string[];
   readonly model?: FrcProjectModel;
   readonly sourceFiles: readonly ProjectSourceFile[];
+  readonly sourceBrowseOnly?: boolean;
   readonly needsImportConfirmation?: boolean;
   readonly sourceImport?: SourceImportSummary;
   readonly migration?: {
@@ -167,6 +169,10 @@ export interface SourceImportSummary {
 
 export interface ProjectSourceFile {
   readonly path: string;
+  readonly kind: ProjectFileKind;
+  readonly format: string;
+  readonly binary: boolean;
+  readonly size: number;
   readonly ownership: 'managed' | 'recognized' | 'custom';
   readonly problemCount: number;
   readonly externallyModified: boolean;

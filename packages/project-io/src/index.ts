@@ -1,5 +1,6 @@
 export * from './file-diff.js';
 export * from './project-lock.js';
+export * from './project-files.js';
 export { PROJECT_SCHEMA } from './project-schema.js';
 export * from './project-watcher.js';
 export * from './transaction.js';

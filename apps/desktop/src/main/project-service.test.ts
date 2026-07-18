@@ -707,12 +707,177 @@ public final class Intake {
       const opened = await service.open(root);
       expect(opened.mode).toBe('source');
       expect(opened.needsImportConfirmation).toBe(true);
+      expect(opened.model?.unmanagedFiles).toContain(
+        'src/main/java/frc/robot/subsystems/Arm/Arm.java',
+      );
       const preview = await service.confirmSourceImport();
       expect(preview.changes.some((change) => change.path === 'project.yaml')).toBe(true);
       expect(preview.changes.some((change) => change.path.endsWith('.java'))).toBe(false);
       await service.applyPreview(preview.id);
       expect(await readFile(sourcePath, 'utf8')).toBe(customJava);
       expect(await readFile(path.join(root, 'project.yaml'), 'utf8')).toContain('schemaVersion: 1');
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('refreshes imported subsystem, goal, device, controller, command, and binding overlays', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-live-import-'));
+    const subsystemDirectory = path.join(root, 'src/main/java/frc/robot/subsystems/Arm');
+    const robotDirectory = path.join(root, 'src/main/java/frc/robot');
+    await mkdir(subsystemDirectory, { recursive: true });
+    const armPath = path.join(subsystemDirectory, 'ArmSubsystem.java');
+    const containerPath = path.join(robotDirectory, 'RobotContainer.java');
+    await writeFile(
+      armPath,
+      `package frc.robot.subsystems.Arm;
+       import edu.wpi.first.wpilibj2.command.Command;
+       import edu.wpi.first.wpilibj2.command.SubsystemBase;
+       import lib.ironpulse.io.MotorIOTalonFX;
+       public final class ArmSubsystem extends SubsystemBase {
+         enum Goal { STOW, SCORE }
+         private final MotorIOTalonFX pivotMotor = null;
+         public Command move() { return null; }
+       }`,
+      'utf8',
+    );
+    await writeFile(
+      containerPath,
+      `package frc.robot;
+       import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+       public final class RobotContainer {
+         private final CommandXboxController driver = new CommandXboxController(0);
+         public RobotContainer() { driver.a().onTrue(move()); }
+       }`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(root, 'build.gradle'),
+      'plugins { id "edu.wpi.first.GradleRIO" version "2026.2.1" }\n',
+      'utf8',
+    );
+    const store = new SettingsStore(path.join(root, '.settings.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      await service.open(root);
+      const preview = await service.confirmSourceImport();
+      await service.applyPreview(preview.id);
+
+      await writeFile(
+        armPath,
+        `package frc.robot.subsystems.Arm;
+         import edu.wpi.first.wpilibj2.command.Command;
+         import edu.wpi.first.wpilibj2.command.SubsystemBase;
+         import lib.ironpulse.io.MotorIOTalonFX;
+         public final class ArmSubsystem extends SubsystemBase {
+           enum Goal { STOW, CLIMB }
+           private final MotorIOTalonFX shoulderMotor = null;
+           public Command hold() { return null; }
+         }`,
+        'utf8',
+      );
+      await writeFile(
+        containerPath,
+        `package frc.robot;
+         import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+         public final class RobotContainer {
+           private final CommandXboxController driver = new CommandXboxController(3);
+           public RobotContainer() { driver.b().whileTrue(hold()); }
+         }`,
+        'utf8',
+      );
+      const refreshed = await service.refresh();
+      const arm = refreshed.model?.subsystems.find(
+        (subsystem) => subsystem.symbol === 'ArmSubsystem',
+      );
+      expect(arm?.stateMachine?.states.map((state) => state.symbol)).toEqual(['STOW', 'CLIMB']);
+      expect(refreshed.model?.devices.map((device) => device.symbol)).toContain('ShoulderMotor');
+      expect(refreshed.model?.devices.map((device) => device.symbol)).not.toContain('PivotMotor');
+      expect(refreshed.model?.commands.some((command) => command.symbol === 'hold')).toBe(true);
+      expect(refreshed.model?.commands.some((command) => command.symbol === 'move')).toBe(false);
+      expect(refreshed.model?.controllers[0]?.port).toBe(3);
+      expect(refreshed.model?.bindings).toEqual([
+        expect.objectContaining({ behavior: 'whileTrue', input: 'driver.b()' }),
+      ]);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('presents a broad, typed source inventory while excluding generated directories', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-source-files-'));
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-source-state-'));
+    const model = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'File Inventory Robot',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    await writeFile(path.join(root, 'project.yaml'), stringifyProjectYaml(model), 'utf8');
+    const fixtureFiles = new Map<string, string | Uint8Array>([
+      ['src/main/java/frc/robot/Robot.java', 'package frc.robot; public class Robot {}'],
+      ['src/main/cpp/Robot.cpp', 'int main() { return 0; }'],
+      ['src/main/deploy/pathplanner/paths/Center.path', '{}'],
+      ['src/main/deploy/elastic-layout.json', '{}'],
+      ['ascope_assets/robot.glb', new Uint8Array([0x67, 0x6c, 0x54, 0x46])],
+      ['vendordeps/Phoenix6.json', '{}'],
+      ['docs/OPERATIONS.md', '# Operations'],
+      ['build/generated/Bogus.java', 'public class Bogus {}'],
+      ['logs/replay.wpilog', new Uint8Array([1, 2, 3])],
+    ]);
+    for (const [relativePath, content] of fixtureFiles) {
+      const filePath = path.join(root, relativePath);
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await writeFile(filePath, content);
+    }
+
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      const opened = await service.open(root);
+      const byPath = new Map(opened.sourceFiles.map((file) => [file.path, file]));
+      expect(byPath.get('src/main/java/frc/robot/Robot.java')).toMatchObject({
+        binary: false,
+        format: 'Java',
+        kind: 'java',
+      });
+      expect(byPath.get('src/main/cpp/Robot.cpp')?.kind).toBe('cpp');
+      expect(byPath.get('src/main/deploy/pathplanner/paths/Center.path')?.kind).toBe('pathplanner');
+      expect(byPath.get('ascope_assets/robot.glb')).toMatchObject({
+        binary: true,
+        kind: 'asset',
+        size: 4,
+      });
+      expect(byPath.get('vendordeps/Phoenix6.json')?.format).toBe('FRC vendor dependency');
+      expect(byPath.has('build/generated/Bogus.java')).toBe(false);
+      expect(byPath.has('logs/replay.wpilog')).toBe(false);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('recognizes Gradle Kotlin and WPILib-style C++ workspaces as FRC projects', async () => {
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-detect-state-'));
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      const kotlinRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-kotlin-'));
+      await writeFile(path.join(kotlinRoot, 'build.gradle.kts'), 'plugins {}', 'utf8');
+      expect((await service.inspectDirectory(kotlinRoot)).kind).toBe('frc-project');
+
+      const cppRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-cpp-'));
+      await writeFile(path.join(cppRoot, 'CMakeLists.txt'), 'project(Robot)', 'utf8');
+      expect((await service.inspectDirectory(cppRoot)).kind).toBe('frc-project');
+      const openedCpp = await service.open(cppRoot);
+      expect(openedCpp).toMatchObject({
+        mode: 'source',
+        sourceBrowseOnly: true,
+      });
+      expect(openedCpp.model?.subsystems).toEqual([]);
+      expect(openedCpp.sourceFiles.map((file) => file.path)).toContain('CMakeLists.txt');
     } finally {
       await service.close();
     }

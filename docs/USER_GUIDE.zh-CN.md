@@ -25,17 +25,18 @@ pnpm dev
 ### 打开或导入
 
 - 含 `project.yaml`：优先读取结构化模型，再索引 Java 文件。
-- 没有 `project.yaml` 的 WPILib 项目：解析源码并显示 Recognized、Partial、Custom 导入预览；确认后才创建结构化模型。
+- 没有 `project.yaml` 的 WPILib Java 项目：解析源码并显示 Recognized、Partial、Custom 导入预览；确认后才创建结构化模型。
+- Gradle Kotlin 和 WPILib C++/CMake 项目也可识别为机器人工作区并浏览完整文件树；当前结构化 Java 推断与代码生成仍以 Java Command-Based 为主。
 - 也可从“最近项目”、命令行路径、文件关联或拖入目录打开。
 
-任何结构化修改都会先进入底部“Diff”区域。检查新增、修改、删除和冲突后点击“应用”；关闭或拒绝预览不会写入项目。
+默认情况下，安全的结构化修改会立即应用；可在设置中打开“修改前预览”，让修改先进入底部“Diff”区域再点击“应用”。存在尚未处理的 Diff 时，软件不会开始下一项修改。关闭或拒绝预览不会写入项目。
 
 ## 3. 项目结构与代码
 
 左侧树可切换两种视图：
 
 - “逻辑”：Robot → Subsystem/Mechanism → Device 的结构；
-- “源码”：Recognized、Partial、Custom 文件及外部修改状态。
+- “源码”：按真实文件夹展开 Java、Kotlin、C/C++、Gradle、PathPlanner、JSON/YAML/TOML/XML、脚本、文档、AdvantageScope 模型和日志等文件，并显示格式、大小、所有权、解析问题与外部修改状态。二进制文件只允许交给关联程序打开，不会被当作文本解析。
 
 在“项目”页可添加 Subsystem、Mechanism、Device 和 Goal。选择节点后，在右侧 Inspector 修改名称、Java symbol、CAN ID、总线、参数、仿真和 NT 发布选项。
 
@@ -50,7 +51,9 @@ pnpm dev
 - 为 Subsystem 生成 Goal 状态枚举和 `setGoalCommand`；
 - 保留 Custom Java 与非托管代码，不把解析失败的逻辑强行改写。
 
-软件持续监听项目中的 Java 文件，并以 80 ms 文件事件防抖和 120 ms 界面批处理增量更新源码索引。新增或删除的 Command、Auto 例程和自定义 Java 文件会自动出现在界面中，不必重新打开项目；这些从源码识别的项目以只读叠加方式显示，不会污染 `project.yaml`。如果外部编辑器修改了受管理文件，软件会要求选择重新载入、比较、保留外部版本或重新生成，不会静默覆盖。
+软件持续监听项目文件，并以 80 ms 文件事件防抖和 120 ms 界面批处理增量更新源码索引。直接在 IDE 中新增、删除或修改 Subsystem、Goal/State enum、电机字段、Controller、Binding、Command 与 Auto 后，界面会移除旧推断并显示新结构，不必重新打开项目。
+
+从手写 Java 推断出的节点会显示“导入源码（只读结构）”。可以浏览层级、查看符号并准确打开代码，但名称、Goal、参数、父级和删除等结构化控件会禁用，避免产生“界面改了、手写代码却没改”的假同步。请在 IDE 中修改这类文件，FRC Framework 会自动重新索引。Framework 自己生成并带 Managed 区域的节点仍可完整编辑。如果外部编辑器修改了受管理文件，软件会要求选择重新载入、比较、保留外部版本或重新生成，不会静默覆盖；有待批准的 Diff 时，外部变化也不会清掉当前预览。
 
 ## 4. 电机、参数与预制模块
 

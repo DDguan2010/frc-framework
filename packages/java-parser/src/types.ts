@@ -21,6 +21,7 @@ export interface JavaField {
   readonly name: string;
   readonly type: string;
   readonly modifiers: readonly string[];
+  readonly initializer?: string;
   readonly range: SourceRange;
 }
 
@@ -37,6 +38,9 @@ export interface JavaType {
   readonly name: string;
   readonly kind: JavaTypeKind;
   readonly modifiers: readonly string[];
+  readonly extendsTypes: readonly string[];
+  readonly implementsTypes: readonly string[];
+  readonly enumConstants: readonly string[];
   readonly range: SourceRange;
   readonly fields: readonly JavaField[];
   readonly methods: readonly JavaMethod[];
@@ -52,6 +56,7 @@ export interface CommandMethod {
 export interface ControllerDeclaration {
   readonly fieldName: string;
   readonly controllerType: string;
+  readonly port?: number;
   readonly range: SourceRange;
 }
 
@@ -65,6 +70,7 @@ export interface CommandBinding {
 export interface StateDeclaration {
   readonly name: string;
   readonly role: 'goal' | 'state' | 'status' | 'enum';
+  readonly values: readonly string[];
   readonly range: SourceRange;
 }
 

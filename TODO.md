@@ -746,3 +746,9 @@
 - [x] **CONT-113 P0** Swerve 与受支持的 Driver Controller 同时存在时自动生成带 deadband/scale/axis inversion 的 field-relative Default Command；Xbox、PS4、PS5、Joystick 与 Generic HID 均有明确轴映射，完整验收项目已编译验证。
 - [x] **CONT-114 P0** 修复 Bash、PowerShell 与 pnpm 间的发布版本参数转发差异，增加解析回归测试，并将 GitHub Actions 升级到基于 Node 24 的当前主版本。
 - [x] **CONT-115 P0** GitHub Release 只公开 Windows EXE、macOS DMG、Linux DEB/RPM 四个原生安装包；便携包、Squirrel 中间文件和审计元数据仅保留为 Actions 构建产物，并通过白名单回归测试防止发布页再次混入内部文件。
+- [x] **CONT-116 P0** 源码树改为真实文件夹层级，统一识别 Java、Kotlin、C/C++、Gradle、PathPlanner、配置、脚本、文档、AdvantageScope/机械模型和机器人日志；二进制与超大文件不作为文本读取。
+- [x] **CONT-117 P0** Java 回读增加继承/接口、嵌套 Goal/State enum 值、字段初始化器、真实 HID 端口与独立 Command class 推断；基础包可从非标准手写项目自适应恢复。
+- [x] **CONT-118 P0** `project.yaml` 与源码覆盖层扩展到 Subsystem、Goal、Device、Controller、Binding、Command 和 Auto，按稳定 ID、源码路径、符号与父子引用重映射，并删除已经从手写代码移除的旧推断。
+- [x] **CONT-119 P0** 手写 Java 推断实体在界面中明确显示只读所有权，禁止产生假同步的重命名、参数、Goal、删除、拖拽和嵌套创建，同时保留源码跳转与实时重新索引。
+- [x] **CONT-120 P1** 逻辑树/源码树切换时清除跨视图筛选；新增 Mechanism、Device、Goal 和嵌套预制后自动展开完整父链并选中新实体。
+- [x] **CONT-121 P0** 以 10541 完整项目、手写源码实时变更、Typed Source Inventory、冷缓存开发启动、Electron 打包 E2E 和完整验收机器人形成兼容性回归闭环。
