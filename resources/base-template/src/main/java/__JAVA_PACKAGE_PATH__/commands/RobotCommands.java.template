@@ -1,0 +1,13 @@
+package {{JAVA_PACKAGE}}.commands;
+
+/**
+ * Factory boundary for commands that coordinate more than one subsystem. A mechanism's local
+ * commands should remain next to that mechanism.
+ */
+public final class RobotCommands {
+    public void configureDefaults() {
+        // <frc-framework:managed>
+        // Generated subsystem default commands are configured here.
+        // </frc-framework:managed>
+    }
+}

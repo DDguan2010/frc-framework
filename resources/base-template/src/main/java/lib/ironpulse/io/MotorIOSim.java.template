@@ -1,0 +1,106 @@
+package lib.ironpulse.io;
+
+import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.system.plant.DCMotor;
+import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.Timer;
+import lib.ironpulse.subsystem.MotorConfiguration;
+
+/** Deterministic kinematic simulation suitable for mechanism logic and command tests. */
+public final class MotorIOSim implements MotorIO {
+    private enum ControlMode {
+        VOLTAGE,
+        POSITION,
+        VELOCITY
+    }
+
+    private double maxVelocityRotationsPerSecond;
+    private double lastTimestampSeconds = Timer.getTimestamp();
+    private double positionRotations;
+    private double velocityRotationsPerSecond;
+    private double appliedVolts;
+    private double setpoint;
+    private double frictionVoltage;
+    private double minimumRotations;
+    private double maximumRotations;
+    private ControlMode mode = ControlMode.VOLTAGE;
+
+    public MotorIOSim(MotorConfiguration config) {
+        applyConfiguration(config);
+    }
+
+    @Override
+    public void applyConfiguration(MotorConfiguration config) {
+        DCMotor motor = DCMotor.getKrakenX60Foc(1);
+        maxVelocityRotationsPerSecond =
+                motor.freeSpeedRadPerSec / (2.0 * Math.PI) / config.simulation().gearing();
+        frictionVoltage = config.simulation().frictionVoltage();
+        minimumRotations = config.simulation().minimumRotations();
+        maximumRotations = config.simulation().maximumRotations();
+    }
+
+    @Override
+    public void updateInputs(MotorInputs inputs) {
+        double now = Timer.getTimestamp();
+        double dt = Math.max(0.0, Math.min(0.1, now - lastTimestampSeconds));
+        lastTimestampSeconds = now;
+        switch (mode) {
+            case VOLTAGE ->
+                    velocityRotationsPerSecond =
+                            Math.abs(appliedVolts) <= frictionVoltage
+                                    ? 0.0
+                                    : appliedVolts / 12.0 * maxVelocityRotationsPerSecond;
+            case VELOCITY ->
+                    velocityRotationsPerSecond =
+                            MathUtil.clamp(
+                                    setpoint,
+                                    -maxVelocityRotationsPerSecond,
+                                    maxVelocityRotationsPerSecond);
+            case POSITION -> {
+                double error = setpoint - positionRotations;
+                velocityRotationsPerSecond =
+                        MathUtil.clamp(
+                                error * 10.0,
+                                -maxVelocityRotationsPerSecond,
+                                maxVelocityRotationsPerSecond);
+            }
+        }
+        positionRotations += velocityRotationsPerSecond * dt;
+        positionRotations = MathUtil.clamp(positionRotations, minimumRotations, maximumRotations);
+        inputs.connected = true;
+        inputs.positionRotations = positionRotations;
+        inputs.velocityRotationsPerSecond = velocityRotationsPerSecond;
+        inputs.appliedVolts = appliedVolts;
+        inputs.statorCurrentAmps = 0.0;
+        inputs.supplyCurrentAmps = 0.0;
+        inputs.temperatureCelsius = 25.0;
+    }
+
+    @Override
+    public void setDutyCycle(double dutyCycle) {
+        setVoltage(dutyCycle * RobotController.getBatteryVoltage());
+    }
+
+    @Override
+    public void setVoltage(double volts) {
+        mode = ControlMode.VOLTAGE;
+        appliedVolts = MathUtil.clamp(volts, -12.0, 12.0);
+    }
+
+    @Override
+    public void setPositionRotations(double rotations) {
+        mode = ControlMode.POSITION;
+        setpoint = rotations;
+    }
+
+    @Override
+    public void setVelocityRotationsPerSecond(double rotationsPerSecond) {
+        mode = ControlMode.VELOCITY;
+        setpoint = rotationsPerSecond;
+    }
+
+    @Override
+    public void zeroPosition() {
+        positionRotations = 0.0;
+    }
+}

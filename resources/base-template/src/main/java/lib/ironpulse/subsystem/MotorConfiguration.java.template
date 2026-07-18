@@ -1,0 +1,223 @@
+package lib.ironpulse.subsystem;
+
+import com.ctre.phoenix6.signals.InvertedValue;
+
+/** Immutable, explicit configuration shared by real and simulated motor IO. */
+public record MotorConfiguration(
+        String name,
+        int canId,
+        String canBus,
+        InvertedValue inversion,
+        boolean brake,
+        double sensorToMechanismRatio,
+        double statorCurrentLimitAmps,
+        double supplyCurrentLimitAmps,
+        double openLoopRampSeconds,
+        double closedLoopRampSeconds,
+        Gains gains,
+        String gravityType,
+        RemoteEncoder remoteEncoder,
+        boolean continuousWrap,
+        SoftLimits softLimits,
+        MotionMagic motionMagic,
+        Zeroing zeroing,
+        double tolerance,
+        Follower follower,
+        Simulation simulation) {
+    public record Gains(double kP, double kI, double kD, double kS, double kV, double kA, double kG) {
+        public static Gains none() {
+            return new Gains(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        }
+    }
+
+    public record RemoteEncoder(boolean enabled, int canId, double rotorToSensorRatio, String source) {
+        public static RemoteEncoder disabled() {
+            return new RemoteEncoder(false, 0, 1.0, "fusedCANcoder");
+        }
+    }
+
+    public record SoftLimits(
+            boolean reverseEnabled,
+            double reverseRotations,
+            boolean forwardEnabled,
+            double forwardRotations) {
+        public static SoftLimits disabled() {
+            return new SoftLimits(false, 0.0, false, 0.0);
+        }
+    }
+
+    public record MotionMagic(
+            double velocityRotationsPerSecond,
+            double accelerationRotationsPerSecondSquared,
+            double jerkRotationsPerSecondCubed) {
+        public static MotionMagic disabled() {
+            return new MotionMagic(0.0, 0.0, 0.0);
+        }
+    }
+
+    public record Zeroing(double voltage, double currentAmps) {
+        public static Zeroing defaults() {
+            return new Zeroing(-2.0, 40.0);
+        }
+    }
+
+    public record Follower(boolean enabled, int leaderCanId, boolean opposeLeader) {
+        public static Follower disabled() {
+            return new Follower(false, 0, false);
+        }
+    }
+
+    public record Simulation(
+            double gearing,
+            double momentOfInertiaKgMetersSquared,
+            double frictionVoltage,
+            double minimumRotations,
+            double maximumRotations) {
+        public static Simulation defaults() {
+            return new Simulation(
+                    1.0, 0.001, 0.0, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
+        }
+    }
+
+    public static Builder talonFx(String name, int canId) {
+        return new Builder(name, canId);
+    }
+
+    public static final class Builder {
+        private final String name;
+        private final int canId;
+        private String canBus = "rio";
+        private InvertedValue inversion = InvertedValue.CounterClockwise_Positive;
+        private boolean brake = true;
+        private double sensorToMechanismRatio = 1.0;
+        private double statorCurrentLimitAmps = Double.NaN;
+        private double supplyCurrentLimitAmps = Double.NaN;
+        private double openLoopRampSeconds = 0.0;
+        private double closedLoopRampSeconds = 0.0;
+        private Gains gains = Gains.none();
+        private String gravityType = "elevatorStatic";
+        private RemoteEncoder remoteEncoder = RemoteEncoder.disabled();
+        private boolean continuousWrap;
+        private SoftLimits softLimits = SoftLimits.disabled();
+        private MotionMagic motionMagic = MotionMagic.disabled();
+        private Zeroing zeroing = Zeroing.defaults();
+        private double tolerance = 0.01;
+        private Follower follower = Follower.disabled();
+        private Simulation simulation = Simulation.defaults();
+
+        private Builder(String name, int canId) {
+            this.name = name;
+            this.canId = canId;
+        }
+
+        public Builder canBus(String value) {
+            canBus = value;
+            return this;
+        }
+
+        public Builder inverted(InvertedValue value) {
+            inversion = value;
+            return this;
+        }
+
+        public Builder brake(boolean value) {
+            brake = value;
+            return this;
+        }
+
+        public Builder sensorToMechanismRatio(double value) {
+            sensorToMechanismRatio = value;
+            return this;
+        }
+
+        public Builder currentLimits(double statorAmps, double supplyAmps) {
+            statorCurrentLimitAmps = statorAmps;
+            supplyCurrentLimitAmps = supplyAmps;
+            return this;
+        }
+
+        public Builder openLoopRamp(double seconds) {
+            openLoopRampSeconds = seconds;
+            return this;
+        }
+
+        public Builder closedLoopRamp(double seconds) {
+            closedLoopRampSeconds = seconds;
+            return this;
+        }
+
+        public Builder gains(Gains value) {
+            gains = value;
+            return this;
+        }
+
+        public Builder gravityType(String value) {
+            gravityType = value;
+            return this;
+        }
+
+        public Builder remoteEncoder(RemoteEncoder value) {
+            remoteEncoder = value;
+            return this;
+        }
+
+        public Builder continuousWrap(boolean value) {
+            continuousWrap = value;
+            return this;
+        }
+
+        public Builder softLimits(SoftLimits value) {
+            softLimits = value;
+            return this;
+        }
+
+        public Builder motionMagic(MotionMagic value) {
+            motionMagic = value;
+            return this;
+        }
+
+        public Builder zeroing(Zeroing value) {
+            zeroing = value;
+            return this;
+        }
+
+        public Builder tolerance(double value) {
+            tolerance = value;
+            return this;
+        }
+
+        public Builder follower(Follower value) {
+            follower = value;
+            return this;
+        }
+
+        public Builder simulation(Simulation value) {
+            simulation = value;
+            return this;
+        }
+
+        public MotorConfiguration build() {
+            return new MotorConfiguration(
+                    name,
+                    canId,
+                    canBus,
+                    inversion,
+                    brake,
+                    sensorToMechanismRatio,
+                    statorCurrentLimitAmps,
+                    supplyCurrentLimitAmps,
+                    openLoopRampSeconds,
+                    closedLoopRampSeconds,
+                    gains,
+                    gravityType,
+                    remoteEncoder,
+                    continuousWrap,
+                    softLimits,
+                    motionMagic,
+                    zeroing,
+                    tolerance,
+                    follower,
+                    simulation);
+        }
+    }
+}

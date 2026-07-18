@@ -1,0 +1,12 @@
+package {{JAVA_PACKAGE}};
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.junit.jupiter.api.Test;
+
+class BaseProjectTest {
+    @Test
+    void teamNumberMatchesGeneratedProject() {
+        assertEquals({{TEAM_NUMBER}}, RobotConstants.TEAM_NUMBER);
+    }
+}

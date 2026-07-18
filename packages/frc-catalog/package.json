@@ -1,0 +1,16 @@
+{
+  "name": "@frc-framework/frc-catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@frc-framework/domain": "workspace:*"
+  },
+  "scripts": {
+    "test": "vitest run --root ../.. packages/frc-catalog/src",
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -1,0 +1,131 @@
+package lib.ironpulse.io;
+
+import com.ctre.phoenix6.configs.TalonFXConfiguration;
+import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.controls.DutyCycleOut;
+import com.ctre.phoenix6.controls.Follower;
+import com.ctre.phoenix6.controls.PositionVoltage;
+import com.ctre.phoenix6.controls.VelocityVoltage;
+import com.ctre.phoenix6.controls.VoltageOut;
+import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.ctre.phoenix6.signals.FeedbackSensorSourceValue;
+import com.ctre.phoenix6.signals.GravityTypeValue;
+import com.ctre.phoenix6.signals.MotorAlignmentValue;
+import lib.ironpulse.subsystem.MotorConfiguration;
+
+/** Phoenix 6 TalonFX adapter with the commonly configured IronPulse parameters. */
+public final class MotorIOTalonFX implements MotorIO {
+    private final TalonFX motor;
+    private final DutyCycleOut dutyCycle = new DutyCycleOut(0.0);
+    private final VoltageOut voltage = new VoltageOut(0.0);
+    private final PositionVoltage position = new PositionVoltage(0.0);
+    private final VelocityVoltage velocity = new VelocityVoltage(0.0);
+
+    public MotorIOTalonFX(MotorConfiguration config) {
+        motor = new TalonFX(config.canId(), new CANBus(config.canBus()));
+        applyConfiguration(config);
+        motor.optimizeBusUtilization();
+    }
+
+    @Override
+    public void applyConfiguration(MotorConfiguration config) {
+        TalonFXConfiguration phoenix = new TalonFXConfiguration();
+        phoenix.MotorOutput.Inverted = config.inversion();
+        phoenix.MotorOutput.NeutralMode =
+                config.brake() ? NeutralModeValue.Brake : NeutralModeValue.Coast;
+        phoenix.Feedback.SensorToMechanismRatio = config.sensorToMechanismRatio();
+        phoenix.OpenLoopRamps.VoltageOpenLoopRampPeriod = config.openLoopRampSeconds();
+        phoenix.ClosedLoopRamps.VoltageClosedLoopRampPeriod = config.closedLoopRampSeconds();
+        phoenix.ClosedLoopGeneral.ContinuousWrap = config.continuousWrap();
+        phoenix.Slot0.kP = config.gains().kP();
+        phoenix.Slot0.kI = config.gains().kI();
+        phoenix.Slot0.kD = config.gains().kD();
+        phoenix.Slot0.kS = config.gains().kS();
+        phoenix.Slot0.kV = config.gains().kV();
+        phoenix.Slot0.kA = config.gains().kA();
+        phoenix.Slot0.kG = config.gains().kG();
+        phoenix.Slot0.GravityType =
+                config.gravityType().equals("armCosine")
+                        ? GravityTypeValue.Arm_Cosine
+                        : GravityTypeValue.Elevator_Static;
+        if (config.remoteEncoder().enabled()) {
+            phoenix.Feedback.FeedbackRemoteSensorID = config.remoteEncoder().canId();
+            phoenix.Feedback.RotorToSensorRatio = config.remoteEncoder().rotorToSensorRatio();
+            phoenix.Feedback.FeedbackSensorSource =
+                    switch (config.remoteEncoder().source()) {
+                        case "remoteCANcoder" -> FeedbackSensorSourceValue.RemoteCANcoder;
+                        case "syncCANcoder" -> FeedbackSensorSourceValue.SyncCANcoder;
+                        default -> FeedbackSensorSourceValue.FusedCANcoder;
+                    };
+        }
+        if (Double.isFinite(config.statorCurrentLimitAmps())) {
+            phoenix.CurrentLimits.StatorCurrentLimitEnable = true;
+            phoenix.CurrentLimits.StatorCurrentLimit = config.statorCurrentLimitAmps();
+        }
+        if (Double.isFinite(config.supplyCurrentLimitAmps())) {
+            phoenix.CurrentLimits.SupplyCurrentLimitEnable = true;
+            phoenix.CurrentLimits.SupplyCurrentLimit = config.supplyCurrentLimitAmps();
+        }
+        if (config.softLimits().forwardEnabled()) {
+            phoenix.SoftwareLimitSwitch.ForwardSoftLimitEnable = true;
+            phoenix.SoftwareLimitSwitch.ForwardSoftLimitThreshold =
+                    config.softLimits().forwardRotations();
+        }
+        if (config.softLimits().reverseEnabled()) {
+            phoenix.SoftwareLimitSwitch.ReverseSoftLimitEnable = true;
+            phoenix.SoftwareLimitSwitch.ReverseSoftLimitThreshold =
+                    config.softLimits().reverseRotations();
+        }
+        phoenix.MotionMagic.MotionMagicCruiseVelocity =
+                config.motionMagic().velocityRotationsPerSecond();
+        phoenix.MotionMagic.MotionMagicAcceleration =
+                config.motionMagic().accelerationRotationsPerSecondSquared();
+        phoenix.MotionMagic.MotionMagicJerk = config.motionMagic().jerkRotationsPerSecondCubed();
+        motor.getConfigurator().apply(phoenix);
+        if (config.follower().enabled()) {
+            motor.setControl(
+                    new Follower(
+                            config.follower().leaderCanId(),
+                            config.follower().opposeLeader()
+                                    ? MotorAlignmentValue.Opposed
+                                    : MotorAlignmentValue.Aligned));
+        }
+    }
+
+    @Override
+    public void updateInputs(MotorInputs inputs) {
+        inputs.connected = motor.isConnected();
+        inputs.positionRotations = motor.getPosition().getValueAsDouble();
+        inputs.velocityRotationsPerSecond = motor.getVelocity().getValueAsDouble();
+        inputs.appliedVolts = motor.getMotorVoltage().getValueAsDouble();
+        inputs.statorCurrentAmps = motor.getStatorCurrent().getValueAsDouble();
+        inputs.supplyCurrentAmps = motor.getSupplyCurrent().getValueAsDouble();
+        inputs.temperatureCelsius = motor.getDeviceTemp().getValueAsDouble();
+    }
+
+    @Override
+    public void setDutyCycle(double value) {
+        motor.setControl(dutyCycle.withOutput(value));
+    }
+
+    @Override
+    public void setVoltage(double volts) {
+        motor.setControl(voltage.withOutput(volts));
+    }
+
+    @Override
+    public void setPositionRotations(double rotations) {
+        motor.setControl(position.withPosition(rotations));
+    }
+
+    @Override
+    public void setVelocityRotationsPerSecond(double rotationsPerSecond) {
+        motor.setControl(velocity.withVelocity(rotationsPerSecond));
+    }
+
+    @Override
+    public void zeroPosition() {
+        motor.setPosition(0.0);
+    }
+}

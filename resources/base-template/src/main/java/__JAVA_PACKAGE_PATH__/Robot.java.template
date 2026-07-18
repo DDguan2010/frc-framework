@@ -1,0 +1,55 @@
+// Copyright (c) FIRST and other WPILib contributors.
+// Open Source Software; you can modify and/or share it under the terms of
+// the WPILib BSD license file in the root directory of this project.
+
+package {{JAVA_PACKAGE}};
+
+import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import lib.ntext.NTParameterRegistry;
+import org.littletonrobotics.junction.LoggedRobot;
+import org.littletonrobotics.junction.Logger;
+import org.littletonrobotics.junction.networktables.NT4Publisher;
+
+public final class Robot extends LoggedRobot {
+    private final RobotContainer container = new RobotContainer();
+    private Command autonomousCommand;
+
+    @Override
+    public void robotInit() {
+        NTParameterRegistry.setEnabled(RobotConstants.ENABLE_NT_PARAMETERS);
+        if (RobotBase.isSimulation()) {
+            Logger.addDataReceiver(new NT4Publisher());
+        }
+        Logger.start();
+        container.initialize();
+    }
+
+    @Override
+    public void robotPeriodic() {
+        CommandScheduler.getInstance().run();
+        NTParameterRegistry.refresh();
+        container.periodic();
+    }
+
+    @Override
+    public void autonomousInit() {
+        autonomousCommand = container.getAutonomousCommand();
+        if (autonomousCommand != null) {
+            CommandScheduler.getInstance().schedule(autonomousCommand);
+        }
+    }
+
+    @Override
+    public void teleopInit() {
+        if (autonomousCommand != null) {
+            autonomousCommand.cancel();
+        }
+    }
+
+    @Override
+    public void testInit() {
+        CommandScheduler.getInstance().cancelAll();
+    }
+}

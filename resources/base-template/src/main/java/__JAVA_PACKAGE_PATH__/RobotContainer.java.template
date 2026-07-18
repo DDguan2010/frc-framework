@@ -1,0 +1,32 @@
+package {{JAVA_PACKAGE}};
+
+import edu.wpi.first.wpilibj2.command.Command;
+import {{JAVA_PACKAGE}}.auto.AutoManager;
+import {{JAVA_PACKAGE}}.commands.RobotCommands;
+import {{JAVA_PACKAGE}}.controls.OperatorInterface;
+import {{JAVA_PACKAGE}}.telemetry.Telemetry;
+
+/** Readable composition root. Robot-specific behavior belongs in the packages below. */
+public final class RobotContainer {
+    private final RobotCommands commands = new RobotCommands();
+    private final OperatorInterface operatorInterface = new OperatorInterface();
+    private final AutoManager autoManager = new AutoManager();
+    private final Telemetry telemetry = new Telemetry();
+
+    public void initialize() {
+        // <frc-framework:managed>
+        commands.configureDefaults();
+        operatorInterface.configureBindings(commands);
+        autoManager.configure(commands);
+        telemetry.publish();
+        // </frc-framework:managed>
+    }
+
+    public void periodic() {
+        telemetry.periodic();
+    }
+
+    public Command getAutonomousCommand() {
+        return autoManager.selectedCommand();
+    }
+}

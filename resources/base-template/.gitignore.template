@@ -1,0 +1,10 @@
+/.gradle/
+/build/
+/bin/
+/.project
+/.classpath
+/.settings/
+/.vscode/
+*.log
+*.wpilog
+*.hoot

@@ -1,0 +1,16 @@
+package {{JAVA_PACKAGE}}.auto;
+
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj2.command.Command;
+import {{JAVA_PACKAGE}}.commands.RobotCommands;
+
+/** Composes actions into complete autonomous routines. */
+public final class AutoRoutines {
+    private AutoRoutines() {}
+
+    public static void configure(SendableChooser<Command> chooser, RobotCommands commands) {
+        // <frc-framework:managed>
+        // Generated autonomous routines are added here.
+        // </frc-framework:managed>
+    }
+}

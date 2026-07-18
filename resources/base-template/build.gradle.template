@@ -1,0 +1,107 @@
+plugins {
+    id 'java'
+    id 'edu.wpi.first.GradleRIO' version '{{WPILIB_GRADLERIO_VERSION}}'
+    id 'com.diffplug.spotless'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+def ROBOT_MAIN_CLASS = '{{JAVA_PACKAGE}}.Main'
+
+deploy {
+    targets {
+        roborio(getTargetTypeClass('RoboRIO')) {
+            team = project.frc.getTeamOrDefault({{TEAM_NUMBER}})
+            debug = project.frc.getDebugOrDefault(false)
+            artifacts {
+                frcJava(getArtifactTypeClass('FRCJavaArtifact')) {}
+                frcStaticFileDeploy(getArtifactTypeClass('FileTreeArtifact')) {
+                    files = project.fileTree('src/main/deploy')
+                    directory = '/home/lvuser/deploy'
+                    deleteOldFiles = false
+                }
+            }
+        }
+    }
+}
+
+def deployArtifact = deploy.targets.roborio.artifacts.frcJava
+wpi.java.debugJni = false
+
+sourceSets {
+    external {
+        java.srcDir 'src/ext/java'
+        resources.srcDir 'src/ext/resources'
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    externalAnnotationProcessor wpi.java.deps.wpilibAnnotations()
+    externalImplementation wpi.java.deps.wpilib()
+    externalImplementation wpi.java.vendor.java()
+    externalImplementation 'com.google.auto.service:auto-service:1.1.1'
+    externalAnnotationProcessor 'com.google.auto.service:auto-service:1.1.1'
+
+    annotationProcessor wpi.java.deps.wpilibAnnotations()
+    implementation wpi.java.deps.wpilib()
+    implementation wpi.java.vendor.java()
+
+    roborioDebug wpi.java.deps.wpilibJniDebug(wpi.platforms.roborio)
+    roborioDebug wpi.java.vendor.jniDebug(wpi.platforms.roborio)
+    roborioRelease wpi.java.deps.wpilibJniRelease(wpi.platforms.roborio)
+    roborioRelease wpi.java.vendor.jniRelease(wpi.platforms.roborio)
+    nativeDebug wpi.java.deps.wpilibJniDebug(wpi.platforms.desktop)
+    nativeDebug wpi.java.vendor.jniDebug(wpi.platforms.desktop)
+    simulationDebug wpi.sim.enableDebug()
+    nativeRelease wpi.java.deps.wpilibJniRelease(wpi.platforms.desktop)
+    nativeRelease wpi.java.vendor.jniRelease(wpi.platforms.desktop)
+    simulationRelease wpi.sim.enableRelease()
+
+    def akitJson = new groovy.json.JsonSlurper().parseText(
+        new File(projectDir, 'vendordeps/AdvantageKit.json').text)
+    annotationProcessor "org.littletonrobotics.akit:akit-autolog:${akitJson.version}"
+
+    implementation files(sourceSets.external.output.classesDirs)
+    annotationProcessor files(sourceSets.external.output.classesDirs)
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+wpi.sim.addGui().defaultEnabled = true
+wpi.sim.addDriverstation()
+
+jar {
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    manifest edu.wpi.first.gradlerio.GradleRIOPlugin.javaManifest(ROBOT_MAIN_CLASS)
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+deployArtifact.jarTask = jar
+wpi.java.configureExecutableTasks(jar)
+wpi.java.configureTestTasks(test)
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs.add '-XDstringConcat=inline'
+}
+
+spotless {
+    java {
+        target 'src/**/*.java'
+        googleJavaFormat().aosp()
+    }
+}
+
+tasks.named('build').configure { dependsOn 'spotlessCheck' }

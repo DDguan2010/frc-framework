@@ -1,0 +1,118 @@
+name: Build and publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (for example 0.2.0 or 0.2.0-beta.1)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set release version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: pnpm release:version -- "$RELEASE_VERSION"
+
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes fakeroot rpm
+
+      - name: Verify source
+        run: pnpm check
+
+      - name: Build installers and archives
+        run: pnpm make
+
+      - name: Generate checksums and SBOM
+        run: pnpm release:metadata
+
+      - name: Upload platform output
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: error
+          name: release-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            apps/desktop/out/make/
+            output/release/
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download every platform artifact
+        uses: actions/download-artifact@v5
+        with:
+          pattern: release-*
+          path: release-files
+          merge-multiple: true
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          find release-files/apps/desktop/out/make -type f \
+            \( -name '*.exe' -o -name '*.nupkg' -o -name 'RELEASES' -o -name '*.zip' \
+               -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \) \
+            -exec cp '{}' publish/ \;
+          for directory in release-files/output/release/*; do
+            [ -d "$directory" ] || continue
+            platform="$(basename "$directory")"
+            for metadata in "$directory"/*; do
+              cp "$metadata" "publish/${platform}-$(basename "$metadata")"
+            done
+          done
+          test -n "$(find publish -type f -print -quit)"
+
+      - name: Create release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${VERSION#v}"
+          gh release create "v${VERSION}" publish/* \
+            --target "${GITHUB_SHA}" \
+            --title "FRC Framework v${VERSION}" \
+            --generate-notes

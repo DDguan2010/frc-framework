@@ -1,0 +1,14 @@
+package lib.ironpulse.io;
+
+import org.littletonrobotics.junction.AutoLog;
+
+@AutoLog
+public class MotorInputs {
+    public boolean connected;
+    public double positionRotations;
+    public double velocityRotationsPerSecond;
+    public double appliedVolts;
+    public double statorCurrentAmps;
+    public double supplyCurrentAmps;
+    public double temperatureCelsius;
+}

@@ -1,0 +1,22 @@
+package {{JAVA_PACKAGE}}.auto;
+
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
+import {{JAVA_PACKAGE}}.commands.RobotCommands;
+
+public final class AutoManager {
+    private final SendableChooser<Command> chooser = new SendableChooser<>();
+
+    public void configure(RobotCommands commands) {
+        chooser.setDefaultOption("Do Nothing", Commands.none());
+        AutoActions.configure(commands);
+        AutoRoutines.configure(chooser, commands);
+        SmartDashboard.putData("Auto/Chooser", chooser);
+    }
+
+    public Command selectedCommand() {
+        return chooser.getSelected();
+    }
+}

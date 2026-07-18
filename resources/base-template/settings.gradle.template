@@ -1,0 +1,25 @@
+import org.gradle.internal.os.OperatingSystem
+
+pluginManagement {
+    repositories {
+        mavenLocal()
+        gradlePluginPortal()
+        String frcYear = '{{WPILIB_YEAR}}'
+        File frcHome
+        if (OperatingSystem.current().isWindows()) {
+            String publicFolder = System.getenv('PUBLIC') ?: 'C:\\Users\\Public'
+            frcHome = new File(new File(publicFolder, 'wpilib'), frcYear)
+        } else {
+            frcHome = new File(new File(System.getProperty('user.home'), 'wpilib'), frcYear)
+        }
+        maven { url = new File(frcHome, 'maven') }
+    }
+    plugins {
+        id 'com.diffplug.spotless' version '6.25.0'
+    }
+}
+
+rootProject.name = '{{PROJECT_NAME}}'
+
+Properties props = System.getProperties()
+props.setProperty('org.gradle.internal.native.headers.unresolved.dependencies.ignore', 'true')

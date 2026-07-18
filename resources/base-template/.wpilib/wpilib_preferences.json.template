@@ -1,0 +1,6 @@
+{
+  "enableCppIntellisense": false,
+  "currentLanguage": "java",
+  "projectYear": "{{WPILIB_YEAR}}",
+  "teamNumber": {{TEAM_NUMBER}}
+}

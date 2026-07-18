@@ -1,0 +1,4 @@
+package {{JAVA_PACKAGE}}.auto;
+
+/** Typed autonomous parameters. Add fields only when a routine needs them. */
+public record AutoParams() {}

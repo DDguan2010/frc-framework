@@ -1,0 +1,17 @@
+package {{JAVA_PACKAGE}};
+
+import edu.wpi.first.wpilibj.RobotBase;
+
+public final class RobotConstants {
+    public enum RuntimeMode {
+        REAL,
+        SIM
+    }
+
+    public static final int TEAM_NUMBER = {{TEAM_NUMBER}};
+    public static final boolean ENABLE_NT_PARAMETERS = true;
+    public static final RuntimeMode RUNTIME_MODE =
+            RobotBase.isReal() ? RuntimeMode.REAL : RuntimeMode.SIM;
+
+    private RobotConstants() {}
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@frc-framework/project-io",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --root ../.. packages/project-io/src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@frc-framework/domain": "workspace:*",
+    "ajv": "8.17.1",
+    "chokidar": "4.0.3",
+    "yaml": "2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.13"
+  }
+}

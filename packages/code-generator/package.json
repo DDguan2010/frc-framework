@@ -1,0 +1,24 @@
+{
+  "name": "@frc-framework/code-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --root ../.. packages/code-generator/src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@frc-framework/domain": "workspace:*",
+    "@frc-framework/frc-catalog": "workspace:*",
+    "@frc-framework/nt-client": "workspace:*",
+    "@frc-framework/presets": "workspace:*",
+    "@frc-framework/project-io": "workspace:*",
+    "@frc-framework/toolchain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.13"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@frc-framework/java-parser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@frc-framework/domain": "workspace:*",
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.20.8"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.13"
+  }
+}

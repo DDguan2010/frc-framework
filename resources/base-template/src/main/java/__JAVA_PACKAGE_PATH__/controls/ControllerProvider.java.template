@@ -1,0 +1,9 @@
+package {{JAVA_PACKAGE}}.controls;
+
+import edu.wpi.first.wpilibj2.command.button.CommandGenericHID;
+
+/** Allows real controllers, custom HIDs, and test doubles to share the same binding code. */
+@FunctionalInterface
+public interface ControllerProvider {
+    CommandGenericHID controller(String role, int port);
+}

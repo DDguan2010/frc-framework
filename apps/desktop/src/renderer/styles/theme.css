@@ -1,0 +1,77 @@
+@font-face {
+  font-family: 'Roboto';
+  font-style: normal;
+  font-weight: 100 900;
+  src: url('../assets/fonts/Roboto-Variable.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Roboto Mono';
+  font-style: normal;
+  font-weight: 100 700;
+  src: url('../assets/fonts/RobotoMono-Variable.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Material Symbols Rounded';
+  font-style: normal;
+  font-weight: 100 700;
+  src: url('../assets/fonts/MaterialSymbolsRounded-Variable.woff2') format('woff2');
+}
+
+:root {
+  color-scheme: dark;
+
+  --app-font-sans: Roboto, 'Segoe UI', 'Noto Sans SC', sans-serif;
+  --app-font-mono: 'Roboto Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --app-surface: #101114;
+  --app-status-ok: #a9d7af;
+
+  --md-ref-typeface-brand: var(--app-font-sans);
+  --md-ref-typeface-plain: var(--app-font-sans);
+  --md-icon-font: 'Material Symbols Rounded';
+
+  --md-sys-color-primary: #f0f1f4;
+  --md-sys-color-on-primary: #1a1b1e;
+  --md-sys-color-primary-container: #37383d;
+  --md-sys-color-on-primary-container: #f4f4f7;
+  --md-sys-color-secondary: #c8c8ce;
+  --md-sys-color-on-secondary: #2f3034;
+  --md-sys-color-secondary-container: #303136;
+  --md-sys-color-on-secondary-container: #efeff2;
+  --md-sys-color-tertiary: #d0d0d7;
+  --md-sys-color-on-tertiary: #303036;
+  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000a;
+  --md-sys-color-on-error-container: #ffdad6;
+  --md-sys-color-background: #101114;
+  --md-sys-color-on-background: #e4e2e6;
+  --md-sys-color-surface: #101114;
+  --md-sys-color-on-surface: #e4e2e6;
+  --md-sys-color-surface-variant: #45464d;
+  --md-sys-color-on-surface-variant: #c6c6cd;
+  --md-sys-color-outline: #909097;
+  --md-sys-color-outline-variant: #303136;
+  --md-sys-color-shadow: #000000;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-inverse-surface: #e4e2e6;
+  --md-sys-color-inverse-on-surface: #303034;
+  --md-sys-color-inverse-primary: #5d5e64;
+  --md-sys-color-surface-dim: #101114;
+  --md-sys-color-surface-bright: #36373b;
+  --md-sys-color-surface-container-lowest: #0b0c0f;
+  --md-sys-color-surface-container-low: #17181b;
+  --md-sys-color-surface-container: #1b1c20;
+  --md-sys-color-surface-container-high: #25262a;
+  --md-sys-color-surface-container-highest: #303034;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "frc-framework",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A structured desktop workspace for readable FRC robot projects.",
+  "author": "0.2Studio",
+  "homepage": "https://github.com/DDguan2010/frc-framework#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DDguan2010/frc-framework.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DDguan2010/frc-framework/issues"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @frc-framework/desktop start",
+    "icons:generate": "node scripts/generate-icons.mjs",
+    "build": "pnpm -r --if-present build",
+    "package": "pnpm --filter @frc-framework/desktop package",
+    "make": "pnpm --filter @frc-framework/desktop make",
+    "release:metadata": "node scripts/generate-release-metadata.mjs",
+    "repair:source-import": "node scripts/repair-legacy-source-import.mjs",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "schema:generate": "node --experimental-strip-types scripts/generate-project-schema.mjs",
+    "licenses:check": "node scripts/check-licenses.mjs",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @frc-framework/desktop package && playwright test",
+    "test:performance": "cross-env FRC_FRAMEWORK_RUN_PERFORMANCE=1 vitest run tests/performance",
+    "test:smoke": "node scripts/run-packaged-smoke.mjs",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm licenses:check",
+    "release:version": "node scripts/set-release-version.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.61.1",
+    "@shockpkg/icon-encoder": "3.2.3",
+    "cross-env": "10.1.0",
+    "eslint": "10.7.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "16.4.0",
+    "playwright": "1.61.1",
+    "prettier": "3.9.5",
+    "sharp": "0.35.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "4.1.10"
+  }
+}

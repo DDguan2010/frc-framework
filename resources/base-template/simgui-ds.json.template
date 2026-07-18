@@ -1,0 +1,25 @@
+{
+  "keyboardJoysticks": [
+    {
+      "axisConfig": [
+        { "decKey": 65, "incKey": 68 },
+        { "decKey": 87, "incKey": 83 },
+        { "decKey": 81, "incKey": 69 }
+      ],
+      "axisCount": 3,
+      "buttonCount": 4,
+      "buttonKeys": [32, 90, 88, 67],
+      "povCount": 0
+    },
+    {
+      "axisConfig": [
+        { "decKey": 74, "incKey": 76 },
+        { "decKey": 73, "incKey": 75 }
+      ],
+      "axisCount": 2,
+      "buttonCount": 4,
+      "buttonKeys": [77, 44, 46, 47],
+      "povCount": 0
+    }
+  ]
+}

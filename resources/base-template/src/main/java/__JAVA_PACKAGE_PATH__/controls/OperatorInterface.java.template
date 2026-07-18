@@ -1,0 +1,28 @@
+package {{JAVA_PACKAGE}}.controls;
+
+import edu.wpi.first.wpilibj2.command.button.CommandGenericHID;
+import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import {{JAVA_PACKAGE}}.commands.RobotCommands;
+
+/** Owns controller instances and trigger-to-command mappings. */
+public final class OperatorInterface {
+    private final ControllerProvider controllers;
+
+    public OperatorInterface() {
+        this((role, port) -> new CommandXboxController(port));
+    }
+
+    public OperatorInterface(ControllerProvider controllers) {
+        this.controllers = controllers;
+    }
+
+    public void configureBindings(RobotCommands commands) {
+        // <frc-framework:managed>
+        // Controllers and bindings selected in FRC Framework are generated here.
+        // </frc-framework:managed>
+    }
+
+    public CommandGenericHID controller(String role, int port) {
+        return controllers.controller(role, port);
+    }
+}

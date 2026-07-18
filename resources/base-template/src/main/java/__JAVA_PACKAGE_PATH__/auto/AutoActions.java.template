@@ -1,0 +1,12 @@
+package {{JAVA_PACKAGE}}.auto;
+
+import {{JAVA_PACKAGE}}.commands.RobotCommands;
+
+/** Small reusable autonomous actions are registered here. */
+public final class AutoActions {
+    private AutoActions() {}
+
+    public static void configure(RobotCommands commands) {
+        // Intentionally empty in the Base.
+    }
+}

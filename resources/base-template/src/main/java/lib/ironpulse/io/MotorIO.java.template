@@ -1,0 +1,23 @@
+package lib.ironpulse.io;
+
+import lib.ironpulse.subsystem.MotorConfiguration;
+
+public interface MotorIO {
+    default void applyConfiguration(MotorConfiguration configuration) {}
+
+    default void updateInputs(MotorInputs inputs) {}
+
+    default void setDutyCycle(double dutyCycle) {}
+
+    default void setVoltage(double volts) {}
+
+    default void setPositionRotations(double rotations) {}
+
+    default void setVelocityRotationsPerSecond(double rotationsPerSecond) {}
+
+    default void zeroPosition() {}
+
+    default void stop() {
+        setVoltage(0.0);
+    }
+}

@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Linux maker dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes fakeroot rpm
+
+      - name: Run static checks and unit tests
+        run: pnpm check
+
+      - name: Package current platform
+        run: pnpm --filter @frc-framework/desktop package
+
+      - name: Run packaged smoke test (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: pnpm test:smoke
+
+      - name: Run packaged smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum pnpm test:smoke
+
+      - name: Run Electron E2E (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: pnpm exec playwright test
+
+      - name: Run Electron E2E (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum pnpm exec playwright test
+
+      - name: Build platform installers and archives
+        run: pnpm make
+
+      - name: Generate checksums, SPDX SBOM, and license inventory
+        run: pnpm release:metadata
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: ignore
+          name: test-artifacts-${{ matrix.os }}
+          path: |
+            playwright-report/
+            test-results/
+            output/playwright/
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: error
+          name: frc-framework-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            apps/desktop/out/make/
+            output/release/
