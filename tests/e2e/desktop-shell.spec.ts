@@ -251,6 +251,7 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect(
       page.getByRole('main').getByRole('strong').filter({ hasText: 'centerAuto()' }),
     ).toBeVisible();
+    await waitForExternalSync(page);
 
     await page
       .getByRole('navigation', { name: i18n.t('nav.workspace') })
@@ -359,6 +360,7 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeHidden({
       timeout: 60_000,
     });
+    await waitForExternalSync(page);
     await expect(page.getByRole('button', { name: 'Intake direct' })).toBeVisible();
 
     await clickMaterialButton(
@@ -383,6 +385,7 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeHidden({
       timeout: 60_000,
     });
+    await waitForExternalSync(page);
     const rollerSubsystem = page.getByRole('treeitem', { name: 'Roller subsystem' });
     await expect(rollerSubsystem).toBeVisible({ timeout: 15_000 });
     const rollerMotor = page.getByRole('treeitem', { name: 'Roller Motor motor' });
@@ -456,4 +459,20 @@ async function clickMaterialButton(_page: Page, button: Locator): Promise<void> 
   await button.scrollIntoViewIfNeeded();
   await expect(button).toBeVisible();
   await button.evaluate((element) => (element as HTMLElement).click());
+}
+
+async function waitForExternalSync(page: Page): Promise<void> {
+  // The renderer intentionally debounces filesystem events. Wait for one full
+  // watcher cycle before asserting that generated writes were not classified
+  // as unresolved external edits.
+  await page.waitForTimeout(400);
+  await expect
+    .poll(() =>
+      page.locator('frc-framework-app').evaluate((element) => {
+        const shell = element as HTMLElement & { externalChanges?: readonly unknown[] };
+        return shell.externalChanges?.length ?? 0;
+      }),
+    )
+    .toBe(0);
+  await expect(page.locator('#external-change-dialog')).toBeHidden();
 }
