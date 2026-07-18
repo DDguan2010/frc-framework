@@ -50,11 +50,18 @@ test('production shell is secure, accessible, and interactive', async () => {
     ).toBeLessThanOrEqual(1);
     expect(launchGeometry.bounds?.x).toBe(launchGeometry.workArea?.x);
     expect(launchGeometry.bounds?.y).toBe(launchGeometry.workArea?.y);
+
+    await application.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (window === undefined) return;
+      const bounds = window.getBounds();
+      window.setSize(Math.min(bounds.width, 1040), Math.min(bounds.height, 720));
+    });
     await expect(page.getByRole('navigation', { name: i18n.t('nav.workspace') })).toBeVisible();
     await expect(page.getByRole('button', { name: i18n.t('home.choose') })).toBeVisible();
-    await expect(
-      page.getByRole('complementary', { name: i18n.t('inspector.title') }),
-    ).toBeVisible();
+    await expect(page.getByRole('complementary', { name: i18n.t('inspector.title') })).toBeVisible({
+      timeout: 15_000,
+    });
 
     const exposedGlobals = await page.evaluate(() => ({
       framework: typeof window.framework,

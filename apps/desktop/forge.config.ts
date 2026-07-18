@@ -71,8 +71,20 @@ const config: ForgeConfig = {
       'darwin',
     ]),
     new MakerZIP({}, ['darwin', 'linux', 'win32']),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerRpm({
+      options: {
+        bin: 'frc-framework',
+        name: 'frc-framework',
+        productName: 'FRC Framework',
+      },
+    }),
+    new MakerDeb({
+      options: {
+        bin: 'frc-framework',
+        name: 'frc-framework',
+        productName: 'FRC Framework',
+      },
+    }),
   ],
   plugins: [
     new VitePlugin({

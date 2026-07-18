@@ -673,23 +673,40 @@ export class AppShell extends LitElement {
     @media (max-width: 1120px) {
       .shell {
         grid-template-areas:
+          'top top top'
+          'nav content inspector'
+          'nav bottom inspector';
+        grid-template-columns:
+          clamp(144px, var(--left-width), 176px) minmax(360px, 1fr)
+          clamp(240px, var(--inspector-width), 280px);
+      }
+
+      .resize-handle {
+        display: none;
+      }
+
+      main {
+        padding: 16px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        grid-template-areas:
           'top top'
           'nav content'
           'nav bottom';
-        grid-template-columns: 84px minmax(0, 1fr);
+        grid-template-columns: 72px minmax(0, 1fr);
       }
 
-      aside,
-      .resize-handle {
+      aside {
         display: none;
       }
 
       nav [slot='headline'] {
         display: none;
       }
-    }
 
-    @media (max-width: 760px) {
       .component-preview,
       .settings-grid {
         grid-template-columns: 1fr;
@@ -2170,6 +2187,7 @@ export class AppShell extends LitElement {
               ([id, key], index) => html`
                 <md-list-item
                   type="button"
+                  aria-label=${t(key)}
                   aria-current=${this.activePage === id ? 'page' : 'false'}
                   @click=${() => (this.activePage = id)}
                 >
@@ -2183,7 +2201,11 @@ export class AppShell extends LitElement {
           <div class="nav-bottom">
             <md-divider></md-divider>
             <md-list>
-              <md-list-item type="button" @click=${this.openSettings}>
+              <md-list-item
+                type="button"
+                aria-label=${t('nav.settings')}
+                @click=${this.openSettings}
+              >
                 <md-icon slot="start">settings</md-icon>
                 <span slot="headline">${t('nav.settings')}</span>
               </md-list-item>
