@@ -11,4 +11,19 @@ public class MotorInputs {
     public double statorCurrentAmps;
     public double supplyCurrentAmps;
     public double temperatureCelsius;
+
+    // Compatibility aliases used by the 2026 IronPulse mechanism API.
+    public double positionRot;
+    public double velocityRotPerSecond;
+    public double motorVolts;
+    public double currentStatorAmps;
+    public double currentSupplyAmps;
+
+    public void syncCompatibilityAliases() {
+        positionRot = positionRotations;
+        velocityRotPerSecond = velocityRotationsPerSecond;
+        motorVolts = appliedVolts;
+        currentStatorAmps = statorCurrentAmps;
+        currentSupplyAmps = supplyCurrentAmps;
+    }
 }

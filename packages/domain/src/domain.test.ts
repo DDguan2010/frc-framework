@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DomainSession } from './history.js';
 import { planSubsystemRemoval } from './deletion.js';
+import { subsystemJavaLocation } from './java-location.js';
 import { createEmptyProject, createEntityId, PRODUCT_NAME, type Subsystem } from './model.js';
 import { validateModel } from './validation.js';
 
@@ -20,6 +21,53 @@ describe('domain model', () => {
     expect(PRODUCT_NAME).toBe('FRC Framework');
     expect(model.project.id).toMatch(/^[0-9a-f-]{36}$/u);
     expect(validateModel(model)).toEqual([]);
+  });
+
+  it('resolves Java files recursively and rejects parent/dependency constructor cycles', () => {
+    const base = fixture();
+    const rootId = createEntityId();
+    const childId = createEntityId();
+    const grandchildId = createEntityId();
+    const nested = {
+      ...base,
+      subsystems: [
+        { displayName: 'Intake', id: rootId, kind: 'subsystem' as const, symbol: 'Intake' },
+        {
+          displayName: 'Pivot',
+          id: childId,
+          kind: 'mechanism' as const,
+          parentId: rootId,
+          symbol: 'Pivot',
+        },
+        {
+          displayName: 'Sensor Logic',
+          id: grandchildId,
+          kind: 'group' as const,
+          parentId: childId,
+          symbol: 'SensorLogic',
+        },
+      ],
+    };
+    expect(subsystemJavaLocation(nested, grandchildId)).toEqual({
+      className: 'SensorLogic',
+      file: 'src/main/java/frc/robot/subsystems/intake/pivot/sensorLogic/SensorLogic.java',
+      packageName: 'frc.robot.subsystems.intake.pivot.sensorLogic',
+    });
+    expect(validateModel(nested).filter((problem) => problem.severity === 'error')).toEqual([]);
+    const cyclic = {
+      ...nested,
+      subsystems: nested.subsystems.map((entry) =>
+        entry.id === childId
+          ? {
+              ...entry,
+              dependencies: [{ fieldName: 'intake', targetSubsystemId: rootId }],
+            }
+          : entry,
+      ),
+    };
+    expect(validateModel(cyclic)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'composition-cycle' })]),
+    );
   });
 
   it('executes typed commands and keeps YAML/code impact metadata', () => {

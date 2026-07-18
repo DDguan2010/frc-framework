@@ -3,6 +3,7 @@ import {
   createEntityId,
   javaSymbol,
   planSubsystemRemoval,
+  subsystemJavaLocation,
   validateModel,
   type AppInfo,
   type Device,
@@ -4853,19 +4854,12 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     const model = this.model();
     const selected = this.selectedEntity();
     if (model === undefined || selected === undefined) return;
-    let root =
+    const owner =
       'parameters' in selected
         ? model.subsystems.find((entry) => entry.id === selected.parentId)
         : selected;
-    while (root?.parentId !== undefined) {
-      root = model.subsystems.find((entry) => entry.id === root?.parentId);
-    }
-    if (root === undefined) return;
-    const packageName =
-      root.javaPackage ?? `${model.project.javaPackage}.subsystems.${lowerFirst(root.symbol)}`;
-    await this.openSourceFile(
-      root.javaFile ?? `src/main/java/${packageName.replace(/\./gu, '/')}/${root.symbol}.java`,
-    );
+    if (owner === undefined) return;
+    await this.openSourceFile(subsystemJavaLocation(model, owner).file);
   };
 
   private readonly prepareDeleteSelected = (): void => {
@@ -4884,20 +4878,13 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       const removedBindingIds = new Set(plan.removedBindingIds);
       const removedAutoIds = new Set(plan.removedAutoIds);
       const removedPresetIds = new Set(plan.removedPresetIds);
-      let root = subsystem;
-      while (root.parentId !== undefined) {
-        const parent = model.subsystems.find((entry) => entry.id === root.parentId);
-        if (parent === undefined) break;
-        root = parent;
-      }
-      const javaFile =
-        root.javaFile ??
-        `src/main/java/${(root.javaPackage ?? `${model.project.javaPackage}.subsystems.${lowerFirst(root.symbol)}`).replace(/\./gu, '/')}/${root.symbol}.java`;
       this.deleteImpact = {
         command: { collection: 'subsystems', id: subsystem.id, type: 'remove' },
         files: [
           'project.yaml',
-          javaFile,
+          ...model.subsystems
+            .filter((entry) => removedSubsystemIds.has(entry.id))
+            .map((entry) => subsystemJavaLocation(model, entry).file),
           'src/main/java/**/RobotContainer.java',
           'src/main/java/**/commands/RobotCommands.java',
           'docs/HARDWARE_MAP.md',
@@ -4952,15 +4939,11 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
         }
       }
     }
-    let root = model.subsystems.find((entry) => entry.id === device.parentId);
-    while (root?.parentId !== undefined) {
-      root = model.subsystems.find((entry) => entry.id === root?.parentId);
-    }
+    const owner = model.subsystems.find((entry) => entry.id === device.parentId);
     const javaFile =
-      root === undefined
+      owner === undefined
         ? 'src/main/java/**/subsystems/**'
-        : (root.javaFile ??
-          `src/main/java/${(root.javaPackage ?? `${model.project.javaPackage}.subsystems.${lowerFirst(root.symbol)}`).replace(/\./gu, '/')}/${root.symbol}.java`);
+        : subsystemJavaLocation(model, owner).file;
     this.deleteImpact = {
       command: { collection: 'devices', id: device.id, type: 'remove' },
       files: ['project.yaml', javaFile, 'docs/HARDWARE_MAP.md', 'docs/TUNING.md'],

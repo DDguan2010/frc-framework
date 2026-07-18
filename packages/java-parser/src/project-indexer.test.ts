@@ -101,4 +101,43 @@ describe('JavaProjectIndexer', () => {
     expect(report.partialFiles).toHaveLength(1);
     expect(report.files[0]?.path).toContain('Arm.java');
   });
+
+  it('recovers an arbitrarily deep generated subsystem tree from Java paths', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-nested-import-'));
+    const source = path.join(root, 'src/main/java/frc/robot/subsystems/intake');
+    const pivotSource = path.join(source, 'intakePivot');
+    const sensorSource = path.join(pivotSource, 'zeroSensorLogic');
+    await mkdir(sensorSource, { recursive: true });
+    await writeFile(
+      path.join(source, 'Intake.java'),
+      'package frc.robot.subsystems.intake; public class Intake {}',
+      'utf8',
+    );
+    await writeFile(
+      path.join(pivotSource, 'IntakePivot.java'),
+      'package frc.robot.subsystems.intake.intakePivot; public class IntakePivot {}',
+      'utf8',
+    );
+    await writeFile(
+      path.join(sensorSource, 'ZeroSensorLogic.java'),
+      'package frc.robot.subsystems.intake.intakePivot.zeroSensorLogic; public class ZeroSensorLogic {}',
+      'utf8',
+    );
+
+    const indexer = await JavaProjectIndexer.create();
+    indexers.push(indexer);
+    const report = await indexer.indexProject(root);
+    const intake = report.model.subsystems.find((entry) => entry.symbol === 'Intake');
+    const pivot = report.model.subsystems.find((entry) => entry.symbol === 'IntakePivot');
+    const sensor = report.model.subsystems.find((entry) => entry.symbol === 'ZeroSensorLogic');
+    expect(intake?.parentId).toBeUndefined();
+    expect(pivot?.parentId).toBe(intake?.id);
+    expect(sensor?.parentId).toBe(pivot?.id);
+    expect(pivot?.javaFile).toBe(
+      'src/main/java/frc/robot/subsystems/intake/intakePivot/IntakePivot.java',
+    );
+    expect(sensor?.javaFile).toBe(
+      'src/main/java/frc/robot/subsystems/intake/intakePivot/zeroSensorLogic/ZeroSensorLogic.java',
+    );
+  });
 });

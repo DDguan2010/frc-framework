@@ -102,10 +102,11 @@ export function resolveTuningPath(
   const override = [...lineage]
     .reverse()
     .find((entry) => entry.networkTablesPath !== undefined)?.networkTablesPath;
-  if (override !== undefined) return joinNtPath(override, parameter.key);
+  if (override !== undefined) return joinNtPath(override, device.displayName, parameter.key);
   return joinNtPath(
     model.networkTables.rootPath,
     ...lineage.map((entry) => entry.displayName),
+    device.displayName,
     parameter.key,
   );
 }

@@ -36,6 +36,19 @@ describe('ProjectService structured edits', () => {
       wheelbase: 0.55,
     });
     await writeStructuredFixture(root, swerve);
+    const legacySwervePath = path.join(
+      root,
+      'src/main/java/frc/robot/subsystems/swerve/SwerveSubsystem.java',
+    );
+    const legacySwerve = await readFile(legacySwervePath, 'utf8');
+    await writeFile(
+      legacySwervePath,
+      legacySwerve.replace(
+        '\n    private void configurePathPlanner()',
+        '\n\n    private void configurePathPlanner()',
+      ),
+      'utf8',
+    );
     const store = new SettingsStore(path.join(stateRoot, 'state.json'));
     await store.load();
     const service = new ProjectService(store, path.resolve('resources/base-template'));
@@ -59,13 +72,66 @@ describe('ProjectService structured edits', () => {
       });
       expect(mechanism.problems).toEqual([]);
       await service.applyPreview(mechanism.id);
+      const helperId = createEntityId();
+      const helper = await service.previewCommand({
+        collection: 'subsystems',
+        entity: {
+          displayName: 'Zero Helper',
+          id: helperId,
+          kind: 'mechanism',
+          parentId: mechanismId,
+          symbol: 'ZeroHelper',
+        },
+        type: 'add',
+      });
+      expect(helper.problems).toEqual([]);
+      await service.applyPreview(helper.id);
+      const withGoals = await service.previewCommand({
+        changes: {
+          behaviorMode: 'goal-driven',
+          stateMachine: {
+            states: ['Idle', 'Zeroing', 'Ready'].map((symbol, index) => ({
+              actions: [],
+              displayName: symbol,
+              id: createEntityId(),
+              initial: index === 0,
+              symbol,
+            })),
+            transitions: [],
+          },
+        },
+        target: { collection: 'subsystems', id: mechanismId, scope: 'entity' },
+        type: 'update',
+      });
+      expect(withGoals.problems).toEqual([]);
+      await service.applyPreview(withGoals.id);
+      const mechanismPath =
+        'src/main/java/frc/robot/subsystems/swerve/odometryHelper/OdometryHelper.java';
+      const helperPath =
+        'src/main/java/frc/robot/subsystems/swerve/odometryHelper/zeroHelper/ZeroHelper.java';
+      expect(await readFile(path.join(root, mechanismPath), 'utf8')).toContain('READY');
+      expect(await readFile(path.join(root, helperPath), 'utf8')).toContain(
+        'public final class ZeroHelper',
+      );
       const mechanismRemoval = await service.previewCommand({
         collection: 'subsystems',
         id: mechanismId,
         type: 'remove',
       });
       expect(mechanismRemoval.problems).toEqual([]);
+      expect(mechanismRemoval.changes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: 'deleted', path: mechanismPath }),
+          expect.objectContaining({ kind: 'deleted', path: helperPath }),
+        ]),
+      );
       const afterMechanismRemoval = await service.applyPreview(mechanismRemoval.id);
+      await expect(readFile(path.join(root, mechanismPath), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(readFile(path.join(root, helperPath), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
       const swerveCommandIds =
         afterMechanismRemoval.model?.commands.map((command) => command.id) ?? [];
       expect(new Set(swerveCommandIds).size).toBe(swerveCommandIds.length);
@@ -525,7 +591,7 @@ describe('ProjectService structured edits', () => {
       const relative = 'src/main/java/frc/robot/subsystems/shooter/Shooter.java';
       const sourcePath = path.join(root, relative);
       const external = (await readFile(sourcePath, 'utf8')).replace(
-        '// No hardware devices are configured for this subsystem.',
+        '// No hardware devices or child nodes are configured for this subsystem.',
         '// EXTERNAL MANAGED EDIT',
       );
       await writeFile(sourcePath, `${external}\nfinal class TeamOwnedHelper {}\n`, 'utf8');

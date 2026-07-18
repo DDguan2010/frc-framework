@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createEmptyProject, createEntityId } from '@frc-framework/domain';
+import { createEmptyProject, createEntityId, subsystemJavaLocation } from '@frc-framework/domain';
 import { instantiateCatalogDevice } from '@frc-framework/frc-catalog';
 import {
   instantiateCommonPreset,
@@ -155,10 +155,10 @@ describe('deterministic project generator', () => {
       ),
     );
     expect(digests).toEqual({
-      emptyBase: '3fc9a3871482426b10ca9df89bb0abf2126c09fc75598ca9e334584b3f7b9587',
-      shooter: '2c2bacc1e17579fca7ad5905f6c6a731ace728d5031f2cd2cd8d60b638e564f7',
-      singleMotor: 'd0ad4c5fc5190e08a9049609be2424f9c3b5aa959f09933919c62f5d67681972',
-      swerveLimelight: '91e15ba71bae8eaf4dff487f35ad88129f6a2dd4dba74594f46b26f94128dbca',
+      emptyBase: '51fad53b9d90eeb408969faccbddd8b54a70d5e45b7313802a382c3be628e445',
+      shooter: 'f5507ba5092f1879d2bfc1cb89faae189ea0a24c5ec19747625107f7a4e3865c',
+      singleMotor: '7d1595ccc917aa25bf6db40b066992a537dda766f406dfb59258cecdf4db35ae',
+      swerveLimelight: 'a537b5e06fd4d98f84210009353050cfe2f5c1d63cea2460c45282346bdb5593',
     });
   });
 
@@ -169,7 +169,7 @@ describe('deterministic project generator', () => {
     expect([...first.files.keys()]).toEqual([...second.files.keys()]);
     expect(mapDigest(first.files)).toBe(mapDigest(second.files));
     expect(mapDigest(first.files)).toBe(
-      '3fc9a3871482426b10ca9df89bb0abf2126c09fc75598ca9e334584b3f7b9587',
+      '51fad53b9d90eeb408969faccbddd8b54a70d5e45b7313802a382c3be628e445',
     );
     expect(first.files.get('src/main/java/frc/robot/alpha/RobotContainer.java')).toContain(
       'package frc.robot.alpha;',
@@ -276,19 +276,183 @@ describe('deterministic project generator', () => {
     const shooter = generated.files.get(
       'src/main/java/frc/robot/alpha/subsystems/shooter/Shooter.java',
     );
-    expect(shooter).toContain('MotorConfiguration.talonFx("Upper Flywheel", 22)');
     expect(shooter).toContain('public enum Goal');
     expect(shooter).toContain('@AutoLogOutput(key = "Shooter/Goal")');
     expect(shooter).toContain('public Command setGoalCommand(Goal value)');
-    expect(shooter).toContain('public enum HoodPositionSetpoint');
-    expect(shooter).toContain('SPEAKER(85.0);');
-    expect(shooter).toContain('HOOD_POSITION_SETPOINT_UNIT = "deg"');
-    expect(shooter).toContain('new MotorIOTalonFX(config)');
+    expect(shooter).toContain('public Upper upper()');
+    const upper = generated.files.get(
+      'src/main/java/frc/robot/alpha/subsystems/shooter/upper/Upper.java',
+    );
+    expect(upper).toContain('MotorConfiguration.talonFx("Upper Flywheel", 22)');
+    expect(upper).toContain('public enum HoodPositionSetpoint');
+    expect(upper).toContain('SPEAKER(85.0);');
+    expect(upper).toContain('HOOD_POSITION_SETPOINT_UNIT = "deg"');
+    expect(upper).toContain('new MotorIOTalonFX(config)');
     expect(generated.files.get('docs/HARDWARE_MAP.md')).toContain('Shooter / Upper');
     expect(generated.files.get('docs/COMPONENT_CATALOG.md')).toContain(
       'lib.ironpulse.io.MotorIOTalonFX',
     );
     expect(generated.files.get('docs/STATE_MODEL.md')).toContain('`Shoot`');
+  });
+
+  it('generates executable Java ownership and goals at every nesting depth', async () => {
+    const base = projectModel();
+    const intakeId = createEntityId();
+    const pivotId = createEntityId();
+    const sensorGroupId = createEntityId();
+    const pivotCommandId = createEntityId();
+    const motor = instantiateCatalogDevice({
+      canId: 24,
+      componentId: 'ironpulse.talonfx-primary',
+      displayName: 'Pivot Motor',
+      parentId: pivotId,
+      selectedParameters: ['kP'],
+      values: { kP: 1.2 },
+    });
+    const stateMachine = (prefix: string) => ({
+      states: [
+        {
+          actions: [],
+          displayName: `${prefix} Idle`,
+          id: createEntityId(),
+          initial: true,
+          symbol: `${prefix}Idle`,
+        },
+        {
+          actions: [],
+          displayName: `${prefix} Active`,
+          id: createEntityId(),
+          symbol: `${prefix}Active`,
+        },
+      ],
+      transitions: [],
+    });
+    const model = {
+      ...base,
+      commands: [
+        {
+          codeExpression: 'intakePivot.setGoalCommand(IntakePivot.Goal.PIVOT_ACTIVE)',
+          displayName: 'Move intake pivot',
+          id: pivotCommandId,
+          kind: 'custom' as const,
+          requirementIds: [pivotId],
+          symbol: 'moveIntakePivot',
+        },
+      ],
+      devices: [motor],
+      subsystems: [
+        {
+          behaviorMode: 'goal-driven' as const,
+          displayName: 'Intake',
+          id: intakeId,
+          kind: 'subsystem' as const,
+          stateMachine: stateMachine('Intake'),
+          symbol: 'Intake',
+        },
+        {
+          behaviorMode: 'goal-driven' as const,
+          displayName: 'Intake Pivot',
+          id: pivotId,
+          kind: 'mechanism' as const,
+          parentId: intakeId,
+          stateMachine: stateMachine('Pivot'),
+          symbol: 'IntakePivot',
+        },
+        {
+          behaviorMode: 'goal-driven' as const,
+          displayName: 'Zero Sensor Logic',
+          id: sensorGroupId,
+          kind: 'group' as const,
+          parentId: pivotId,
+          stateMachine: stateMachine('Sensor'),
+          symbol: 'ZeroSensorLogic',
+        },
+      ],
+    };
+    const generated = await generateProject(model);
+    const intakePath = subsystemJavaLocation(model, intakeId).file;
+    const pivotPath = subsystemJavaLocation(model, pivotId).file;
+    const sensorPath = subsystemJavaLocation(model, sensorGroupId).file;
+    expect(intakePath).toBe('src/main/java/frc/robot/alpha/subsystems/intake/Intake.java');
+    expect(pivotPath).toBe(
+      'src/main/java/frc/robot/alpha/subsystems/intake/intakePivot/IntakePivot.java',
+    );
+    expect(sensorPath).toBe(
+      'src/main/java/frc/robot/alpha/subsystems/intake/intakePivot/zeroSensorLogic/ZeroSensorLogic.java',
+    );
+    expect(generated.files.get(intakePath)).toContain('public enum Goal');
+    expect(generated.files.get(intakePath)).toContain('public Intake(IntakePivot intakePivot)');
+    expect(generated.files.get(pivotPath)).toContain('public enum Goal');
+    expect(generated.files.get(pivotPath)).toContain(
+      'public IntakePivot(ZeroSensorLogic zeroSensorLogic)',
+    );
+    expect(generated.files.get(pivotPath)).toContain(
+      'MotorConfiguration.talonFx("Pivot Motor", 24)',
+    );
+    expect(generated.files.get(sensorPath)).toContain('SENSOR_ACTIVE');
+    expect(generated.files.get(intakePath)).toContain('return intakePivot.pivotMotor();');
+    const container = generated.files.get('src/main/java/frc/robot/alpha/RobotContainer.java');
+    expect(String(container).indexOf('new ZeroSensorLogic()')).toBeLessThan(
+      String(container).indexOf('new IntakePivot(zeroSensorLogic)'),
+    );
+    expect(String(container).indexOf('new IntakePivot(zeroSensorLogic)')).toBeLessThan(
+      String(container).indexOf('new Intake(intakePivot)'),
+    );
+    expect(container).toContain('new RobotCommands(intakePivot)');
+    const robotCommands = generated.files.get(
+      'src/main/java/frc/robot/alpha/commands/RobotCommands.java',
+    );
+    expect(robotCommands).toContain(
+      'import frc.robot.alpha.subsystems.intake.intakePivot.IntakePivot;',
+    );
+    expect(robotCommands).toContain('private final IntakePivot intakePivot;');
+  });
+
+  it('keeps repeated motor names valid in separate nested branches', async () => {
+    const base = projectModel();
+    const shooterId = createEntityId();
+    const upperId = createEntityId();
+    const lowerId = createEntityId();
+    const upperMotor = instantiateCatalogDevice({
+      canId: 21,
+      componentId: 'ironpulse.talonfx-primary',
+      displayName: 'Roller',
+      parentId: upperId,
+    });
+    const lowerMotor = instantiateCatalogDevice({
+      canId: 22,
+      componentId: 'ironpulse.talonfx-primary',
+      displayName: 'Roller',
+      parentId: lowerId,
+    });
+    const model = {
+      ...base,
+      devices: [upperMotor, lowerMotor],
+      subsystems: [
+        { displayName: 'Shooter', id: shooterId, kind: 'subsystem' as const, symbol: 'Shooter' },
+        {
+          displayName: 'Upper',
+          id: upperId,
+          kind: 'mechanism' as const,
+          parentId: shooterId,
+          symbol: 'Upper',
+        },
+        {
+          displayName: 'Lower',
+          id: lowerId,
+          kind: 'mechanism' as const,
+          parentId: shooterId,
+          symbol: 'Lower',
+        },
+      ],
+    };
+    const generated = await generateProject(model);
+    const root = generated.files.get(subsystemJavaLocation(model, shooterId).file);
+    const upper = generated.files.get(subsystemJavaLocation(model, upperId).file);
+    const lower = generated.files.get(subsystemJavaLocation(model, lowerId).file);
+    expect(root).not.toContain('MotorSubsystem roller()');
+    expect(upper).toContain('MotorSubsystem roller()');
+    expect(lower).toContain('MotorSubsystem roller()');
   });
 
   it('generates explicit cross-subsystem imports, constructor injection, and composition order', async () => {
@@ -513,16 +677,22 @@ describe.runIf(process.env.FRC_FRAMEWORK_RUN_BASE_INTEGRATION === '1')(
           'motionMagicJerk',
           'motionMagicVelocity',
           'remoteEncoderEnabled',
+          'remoteEncoderCanBus',
           'remoteEncoderId',
+          'remoteEncoderMagnetOffset',
+          'remoteEncoderSensorDirection',
           'reverseSoftLimit',
           'reverseSoftLimitEnabled',
           'rotorToSensorRatio',
           'simFrictionVoltage',
           'simMaximum',
           'simMinimum',
+          'staticFeedforwardSign',
           'tolerance',
           'zeroingCurrent',
+          'zeroingFilterSize',
           'zeroingVoltage',
+          'zeroOffset',
         ],
         values: {
           closedLoopRamp: 0.1,
@@ -537,16 +707,22 @@ describe.runIf(process.env.FRC_FRAMEWORK_RUN_BASE_INTEGRATION === '1')(
           motionMagicJerk: 200,
           motionMagicVelocity: 10,
           remoteEncoderEnabled: true,
+          remoteEncoderCanBus: 'canivore',
           remoteEncoderId: 24,
+          remoteEncoderMagnetOffset: 0.125,
+          remoteEncoderSensorDirection: 'clockwisePositive',
           reverseSoftLimit: -1,
           reverseSoftLimitEnabled: true,
           rotorToSensorRatio: 2,
           simFrictionVoltage: 0.2,
           simMaximum: 12,
           simMinimum: -1,
+          staticFeedforwardSign: 'closedLoopSign',
           tolerance: 0.02,
           zeroingCurrent: 35,
+          zeroingFilterSize: 7,
           zeroingVoltage: -1.5,
+          zeroOffset: 0.25,
         },
       });
       const follower = instantiateCatalogDevice({
@@ -570,11 +746,11 @@ describe.runIf(process.env.FRC_FRAMEWORK_RUN_BASE_INTEGRATION === '1')(
         ],
         commands: [
           {
-            codeExpression: 'shooter.setGoalCommand(Shooter.Goal.IDLE)',
+            codeExpression: 'upper.upperFlywheel().stopCommand()',
             displayName: 'Prepare Shooter',
             id: commandId,
             kind: 'custom' as const,
-            requirementIds: [shooterId],
+            requirementIds: [upperId],
             symbol: 'prepareShooter',
           },
         ],
@@ -627,6 +803,12 @@ describe.runIf(process.env.FRC_FRAMEWORK_RUN_BASE_INTEGRATION === '1')(
       expect(
         await readFile(
           path.join(root, 'src/main/java/frc/robot/alpha/subsystems/shooter/Shooter.java'),
+          'utf8',
+        ),
+      ).toContain('return upper.upperFlywheel();');
+      expect(
+        await readFile(
+          path.join(root, 'src/main/java/frc/robot/alpha/subsystems/shooter/upper/Upper.java'),
           'utf8',
         ),
       ).toContain('Upper Flywheel');

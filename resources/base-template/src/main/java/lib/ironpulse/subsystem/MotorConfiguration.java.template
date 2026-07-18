@@ -16,9 +16,11 @@ public record MotorConfiguration(
         double closedLoopRampSeconds,
         Gains gains,
         String gravityType,
+        String staticFeedforwardSign,
         RemoteEncoder remoteEncoder,
         boolean continuousWrap,
         SoftLimits softLimits,
+        double zeroOffsetRotations,
         MotionMagic motionMagic,
         Zeroing zeroing,
         double tolerance,
@@ -30,9 +32,23 @@ public record MotorConfiguration(
         }
     }
 
-    public record RemoteEncoder(boolean enabled, int canId, double rotorToSensorRatio, String source) {
+    public record RemoteEncoder(
+            boolean enabled,
+            int canId,
+            String canBus,
+            double magnetOffsetRotations,
+            String sensorDirection,
+            double rotorToSensorRatio,
+            String source) {
         public static RemoteEncoder disabled() {
-            return new RemoteEncoder(false, 0, 1.0, "fusedCANcoder");
+            return new RemoteEncoder(
+                    false,
+                    0,
+                    "rio",
+                    0.0,
+                    "counterClockwisePositive",
+                    1.0,
+                    "fusedCANcoder");
         }
     }
 
@@ -55,9 +71,9 @@ public record MotorConfiguration(
         }
     }
 
-    public record Zeroing(double voltage, double currentAmps) {
+    public record Zeroing(double voltage, double currentAmps, int filterSize) {
         public static Zeroing defaults() {
-            return new Zeroing(-2.0, 40.0);
+            return new Zeroing(-2.0, 40.0, 5);
         }
     }
 
@@ -96,9 +112,11 @@ public record MotorConfiguration(
         private double closedLoopRampSeconds = 0.0;
         private Gains gains = Gains.none();
         private String gravityType = "elevatorStatic";
+        private String staticFeedforwardSign = "closedLoopSign";
         private RemoteEncoder remoteEncoder = RemoteEncoder.disabled();
         private boolean continuousWrap;
         private SoftLimits softLimits = SoftLimits.disabled();
+        private double zeroOffsetRotations;
         private MotionMagic motionMagic = MotionMagic.disabled();
         private Zeroing zeroing = Zeroing.defaults();
         private double tolerance = 0.01;
@@ -156,6 +174,11 @@ public record MotorConfiguration(
             return this;
         }
 
+        public Builder staticFeedforwardSign(String value) {
+            staticFeedforwardSign = value;
+            return this;
+        }
+
         public Builder remoteEncoder(RemoteEncoder value) {
             remoteEncoder = value;
             return this;
@@ -168,6 +191,11 @@ public record MotorConfiguration(
 
         public Builder softLimits(SoftLimits value) {
             softLimits = value;
+            return this;
+        }
+
+        public Builder zeroOffsetRotations(double value) {
+            zeroOffsetRotations = value;
             return this;
         }
 
@@ -210,9 +238,11 @@ public record MotorConfiguration(
                     closedLoopRampSeconds,
                     gains,
                     gravityType,
+                    staticFeedforwardSign,
                     remoteEncoder,
                     continuousWrap,
                     softLimits,
+                    zeroOffsetRotations,
                     motionMagic,
                     zeroing,
                     tolerance,

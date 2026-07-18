@@ -24,6 +24,9 @@ informed by the robot library maintained by FRC Team 6941, IronPulse Robotics (`
 engineering ideas.
 
 The upstream repository was reviewed at commit `51caf1287c07ec27eae1af40aa08366c4c27fa8d`.
+The compatibility surface was additionally checked against the local 10541 offseason robot at
+commit `c0df8d87014e327f8d604d2753783e87eed3cdad`; that project contains team-specific evolution of
+the motor simulation, TalonFX, subsystem configuration, Limelight, and swerve APIs.
 Because it does not currently state a redistribution license for all original IronPulse sources,
 FRC Framework does not bundle that repository wholesale. The compatibility sources shipped in the
 Base are independently implemented and use only dependencies already present in generated robots.

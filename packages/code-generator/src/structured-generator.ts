@@ -5,6 +5,7 @@ import type {
   StateDefinition,
   Subsystem,
 } from '@frc-framework/domain';
+import { rootSubsystem, subsystemJavaLocation } from '@frc-framework/domain';
 import { findComponentDefinition, validateHardware } from '@frc-framework/frc-catalog';
 import { collectTuningParameters } from '@frc-framework/nt-client';
 import { generatePresetFiles } from '@frc-framework/presets';
@@ -20,12 +21,11 @@ export function generateStructuredFiles(
     );
   }
   const files = new Map<string, ProjectFileContent>();
-  for (const subsystem of roots(model)) {
-    const packageName =
-      subsystem.javaPackage ??
-      `${model.project.javaPackage}.subsystems.${lowerFirst(subsystem.symbol)}`;
-    const relative = `src/main/java/${packageName.replace(/\./gu, '/')}/${subsystem.symbol}.java`;
-    files.set(relative, subsystemJava(model, subsystem, packageName));
+  for (const subsystem of [...model.subsystems].sort((left, right) =>
+    subsystemJavaLocation(model, left).file.localeCompare(subsystemJavaLocation(model, right).file),
+  )) {
+    const location = subsystemJavaLocation(model, subsystem);
+    files.set(location.file, subsystemJava(model, subsystem, location.packageName));
   }
   files.set(
     `src/main/java/${model.project.javaPackage.replace(/\./gu, '/')}/RobotContainer.java`,
@@ -103,28 +103,35 @@ function descendants(model: FrcProjectModel, rootId: string): readonly Subsystem
   return result;
 }
 
-function subsystemJava(model: FrcProjectModel, root: Subsystem, packageName: string): string {
-  const nodes = [root, ...descendants(model, root.id)];
-  const nodeIds = new Set(nodes.map((entry) => entry.id));
-  const motors = model.devices
-    .filter((device) => nodeIds.has(device.parentId) && device.kind === 'motor')
+function children(model: FrcProjectModel, parentId: string): readonly Subsystem[] {
+  return model.subsystems
+    .filter((entry) => entry.parentId === parentId)
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
-  const mechanismConfigurations = model.devices
+}
+
+function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: string): string {
+  const directChildren = children(model, node.id);
+  const ownedDevices = model.devices.filter(
+    (device) => device.parentId === node.id && !presetOwnsDevice(model, node, device),
+  );
+  const motors = ownedDevices
+    .filter((device) => device.kind === 'motor')
+    .sort((left, right) => left.symbol.localeCompare(right.symbol));
+  const mechanismConfigurations = ownedDevices
     .filter(
       (device) =>
-        nodeIds.has(device.parentId) &&
         device.catalogId !== undefined &&
         findComponentDefinition(device.catalogId)?.role === 'mechanism',
     )
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
-  const beamBreaks = model.devices
-    .filter((device) => nodeIds.has(device.parentId) && device.catalogId === 'ironpulse.beam-break')
+  const beamBreaks = ownedDevices
+    .filter((device) => device.catalogId === 'ironpulse.beam-break')
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
-  const indicators = model.devices
-    .filter((device) => nodeIds.has(device.parentId) && device.catalogId === 'ironpulse.indicator')
+  const indicators = ownedDevices
+    .filter((device) => device.catalogId === 'ironpulse.indicator')
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
-  const stateMachine = root.stateMachine;
-  const dependencies = (root.dependencies ?? [])
+  const stateMachine = node.stateMachine;
+  const dependencies = (node.dependencies ?? [])
     .map((dependency) => ({
       ...dependency,
       target: model.subsystems.find((entry) => entry.id === dependency.targetSubsystemId),
@@ -132,12 +139,21 @@ function subsystemJava(model: FrcProjectModel, root: Subsystem, packageName: str
     .filter((entry): entry is typeof entry & { target: Subsystem } => entry.target !== undefined)
     .sort((left, right) => left.fieldName.localeCompare(right.fieldName));
   const needsCommands = stateMachine !== undefined && stateMachine.states.length > 0;
+  const hasDelegatedMotors = model.devices.some((device) => {
+    const owner = model.subsystems.find((entry) => entry.id === device.parentId);
+    return (
+      device.kind === 'motor' &&
+      owner !== undefined &&
+      descendants(model, node.id).some((entry) => entry.id === owner.id) &&
+      !presetOwnsDevice(model, owner, device)
+    );
+  });
   const hasTuning = motors.some((device) =>
     device.parameters.some((parameter) => parameter.networkTables?.enabled === true),
   );
   const imports = [
-    'com.ctre.phoenix6.signals.InvertedValue',
-    'edu.wpi.first.wpilibj.RobotBase',
+    ...(motors.length === 0 ? [] : ['com.ctre.phoenix6.signals.InvertedValue']),
+    ...(motors.length === 0 ? [] : ['edu.wpi.first.wpilibj.RobotBase']),
     ...(beamBreaks.length === 0
       ? []
       : ['edu.wpi.first.wpilibj.AnalogInput', 'edu.wpi.first.wpilibj.DigitalInput']),
@@ -145,53 +161,66 @@ function subsystemJava(model: FrcProjectModel, root: Subsystem, packageName: str
       ? []
       : ['edu.wpi.first.wpilibj.AddressableLED', 'edu.wpi.first.wpilibj.AddressableLEDBuffer']),
     ...(needsCommands ? ['edu.wpi.first.wpilibj2.command.Command'] : []),
-    ...(needsCommands && root.advantageKitLogging === true
+    ...(needsCommands && node.advantageKitLogging === true
       ? ['org.littletonrobotics.junction.AutoLogOutput']
       : []),
-    'lib.ironpulse.io.MotorIO',
-    'lib.ironpulse.io.MotorIOSim',
-    'lib.ironpulse.io.MotorIOTalonFX',
-    'lib.ironpulse.subsystem.MotorConfiguration',
-    'lib.ironpulse.subsystem.MotorSubsystem',
+    ...(motors.length === 0
+      ? []
+      : [
+          'lib.ironpulse.io.MotorIO',
+          'lib.ironpulse.io.MotorIOSim',
+          'lib.ironpulse.io.MotorIOTalonFX',
+          'lib.ironpulse.subsystem.MotorConfiguration',
+          'lib.ironpulse.subsystem.MotorSubsystem',
+        ]),
+    ...(motors.length === 0 && hasDelegatedMotors
+      ? ['lib.ironpulse.subsystem.MotorSubsystem']
+      : []),
     ...(hasTuning ? [`${model.project.javaPackage}.tuning.TuningParameters`] : []),
+    ...directChildren.map((child) => {
+      const location = subsystemJavaLocation(model, child);
+      return location.packageName === packageName ? '' : `${location.packageName}.${child.symbol}`;
+    }),
     ...dependencies.map((dependency) => {
-      const targetPackage =
-        dependency.target.javaPackage ??
-        `${model.project.javaPackage}.subsystems.${lowerFirst(dependency.target.symbol)}`;
-      return `${targetPackage}.${dependency.target.symbol}`;
+      const location = subsystemJavaLocation(model, dependency.target);
+      return location.packageName === packageName
+        ? ''
+        : `${location.packageName}.${dependency.target.symbol}`;
     }),
   ];
   const lines: string[] = [
     `package ${packageName};`,
     '',
-    ...imports.sort().map((entry) => `import ${entry};`),
+    ...[...new Set(imports.filter((entry) => entry.length > 0))]
+      .sort()
+      .map((entry) => `import ${entry};`),
     '',
-    `/** ${escapeJavadoc(root.notes ?? `${root.displayName} subsystem.`)} */`,
-    `public final class ${root.symbol} {`,
+    `/** ${escapeJavadoc(node.notes ?? `${node.displayName} ${node.kind}.`)} */`,
+    `public final class ${node.symbol} {`,
     '    // <frc-framework:managed>',
   ];
-  for (const node of nodes) {
-    if (node.id !== root.id) lines.push(`    // ${node.displayName}`);
-    for (const motor of motors.filter((entry) => entry.parentId === node.id)) {
-      lines.push(...motorDeclaration(model, motor));
-    }
-    for (const mechanism of mechanismConfigurations.filter((entry) => entry.parentId === node.id)) {
-      lines.push(...mechanismSetpointDeclaration(mechanism));
-    }
-    for (const sensor of beamBreaks.filter((entry) => entry.parentId === node.id)) {
-      lines.push(...beamBreakDeclaration(sensor));
-    }
-    for (const indicator of indicators.filter((entry) => entry.parentId === node.id)) {
-      lines.push(...indicatorDeclaration(indicator));
-    }
+  for (const child of directChildren) {
+    lines.push(`    private final ${child.symbol} ${lowerFirst(child.symbol)};`);
   }
   for (const dependency of dependencies) {
     lines.push(`    private final ${dependency.target.symbol} ${dependency.fieldName};`);
   }
-  if (dependencies.length > 0) {
+  for (const motor of motors) lines.push(...motorDeclaration(model, motor));
+  for (const mechanism of mechanismConfigurations)
+    lines.push(...mechanismSetpointDeclaration(mechanism));
+  for (const sensor of beamBreaks) lines.push(...beamBreakDeclaration(sensor));
+  for (const indicator of indicators) lines.push(...indicatorDeclaration(indicator));
+  const constructorParameters = [
+    ...directChildren.map((child) => `${child.symbol} ${lowerFirst(child.symbol)}`),
+    ...dependencies.map((dependency) => `${dependency.target.symbol} ${dependency.fieldName}`),
+  ];
+  if (constructorParameters.length > 0) {
     lines.push(
       '',
-      `    public ${root.symbol}(${dependencies.map((dependency) => `${dependency.target.symbol} ${dependency.fieldName}`).join(', ')}) {`,
+      `    public ${node.symbol}(${constructorParameters.join(', ')}) {`,
+      ...directChildren.map(
+        (child) => `        this.${lowerFirst(child.symbol)} = ${lowerFirst(child.symbol)};`,
+      ),
       ...dependencies.map(
         (dependency) => `        this.${dependency.fieldName} = ${dependency.fieldName};`,
       ),
@@ -202,19 +231,29 @@ function subsystemJava(model: FrcProjectModel, root: Subsystem, packageName: str
     motors.length === 0 &&
     mechanismConfigurations.length === 0 &&
     beamBreaks.length === 0 &&
-    indicators.length === 0
-  )
-    lines.push('    // No hardware devices are configured for this subsystem.');
+    indicators.length === 0 &&
+    directChildren.length === 0
+  ) {
+    lines.push(`    // No hardware devices or child nodes are configured for this ${node.kind}.`);
+  }
   if (needsCommands)
     lines.push(
       '',
       ...stateMachineDeclaration(
         stateMachine.states,
-        root.generateGoalCommand !== false,
-        root.advantageKitLogging === true ? root.symbol : undefined,
+        node.generateGoalCommand !== false,
+        node.advantageKitLogging === true ? node.symbol : undefined,
       ),
     );
   lines.push('    // </frc-framework:managed>', '');
+  for (const child of directChildren) {
+    lines.push(
+      `    public ${child.symbol} ${lowerFirst(child.symbol)}() {`,
+      `        return ${lowerFirst(child.symbol)};`,
+      '    }',
+      '',
+    );
+  }
   for (const motor of motors) {
     lines.push(
       `    public MotorSubsystem ${lowerFirst(motor.symbol)}() {`,
@@ -248,14 +287,67 @@ function subsystemJava(model: FrcProjectModel, root: Subsystem, packageName: str
       '',
     );
   }
-  lines.push(
-    '    private static MotorIO createMotorIO(MotorConfiguration config) {',
-    '        return RobotBase.isReal() ? new MotorIOTalonFX(config) : new MotorIOSim(config);',
-    '    }',
-    '}',
-    '',
-  );
+  lines.push(...descendantMotorDelegates(model, node));
+  if (motors.length > 0) {
+    lines.push(
+      '    private static MotorIO createMotorIO(MotorConfiguration config) {',
+      '        return RobotBase.isReal() ? new MotorIOTalonFX(config) : new MotorIOSim(config);',
+      '    }',
+    );
+  }
+  lines.push('}', '');
   return lines.join('\n');
+}
+
+function presetOwnsDevice(model: FrcProjectModel, node: Subsystem, device: Device): boolean {
+  const root = rootSubsystem(model, node);
+  return (
+    model.presets.some((preset) => preset.presetId === 'frc.swerve') &&
+    root.javaFile?.replace(/\\/gu, '/').endsWith('/subsystems/swerve/SwerveSubsystem.java') ===
+      true &&
+    ['swerve-drive', 'swerve-steer', 'swerve-encoder', 'swerve-gyro'].includes(device.role ?? '')
+  );
+}
+
+function descendantMotorDelegates(model: FrcProjectModel, node: Subsystem): readonly string[] {
+  const lines: string[] = [];
+  const descendantIds = new Set(descendants(model, node.id).map((entry) => entry.id));
+  const motors = model.devices
+    .filter((device) => descendantIds.has(device.parentId) && device.kind === 'motor')
+    .sort((left, right) => left.symbol.localeCompare(right.symbol));
+  const directMemberNames = new Set(
+    model.devices
+      .filter((device) => device.parentId === node.id)
+      .map((device) => lowerFirst(device.symbol)),
+  );
+  const nameCounts = new Map<string, number>();
+  for (const motor of motors) {
+    const name = lowerFirst(motor.symbol);
+    nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+  }
+  for (const motor of motors) {
+    const owner = model.subsystems.find((entry) => entry.id === motor.parentId);
+    let directChild = owner;
+    while (directChild?.parentId !== node.id) {
+      directChild = model.subsystems.find((entry) => entry.id === directChild?.parentId);
+    }
+    const methodName = lowerFirst(motor.symbol);
+    if (
+      owner === undefined ||
+      directChild === undefined ||
+      presetOwnsDevice(model, owner, motor) ||
+      directMemberNames.has(methodName) ||
+      nameCounts.get(methodName) !== 1
+    )
+      continue;
+    lines.push(
+      `    public MotorSubsystem ${methodName}() {`,
+      `        return ${lowerFirst(directChild.symbol)}.${methodName}();`,
+      '    }',
+      '',
+    );
+  }
+  return lines;
 }
 
 function beamBreakDeclaration(device: Device): readonly string[] {
@@ -353,8 +445,14 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
   const simMinimum = numberParameter(device, 'simMinimum', Number.NEGATIVE_INFINITY);
   const simMaximum = numberParameter(device, 'simMaximum', Number.POSITIVE_INFINITY);
   const gravityType = stringParameter(device, 'gravityType') ?? 'elevatorStatic';
+  const staticFeedforwardSign =
+    stringParameter(device, 'staticFeedforwardSign') ?? 'closedLoopSign';
   const remoteEnabled = booleanParameter(device, 'remoteEncoderEnabled');
   const remoteId = numberParameter(device, 'remoteEncoderId', 0);
+  const remoteCanBus = stringParameter(device, 'remoteEncoderCanBus') ?? device.canBus ?? 'rio';
+  const remoteMagnetOffset = numberParameter(device, 'remoteEncoderMagnetOffset', 0);
+  const remoteSensorDirection =
+    stringParameter(device, 'remoteEncoderSensorDirection') ?? 'counterClockwisePositive';
   const rotorRatio = numberParameter(device, 'rotorToSensorRatio', 1);
   const feedbackSource = stringParameter(device, 'feedbackSource') ?? 'fusedCANcoder';
   const continuousWrap = booleanParameter(device, 'continuousWrap');
@@ -363,6 +461,8 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
   const motionJerk = numberParameter(device, 'motionMagicJerk', 0);
   const zeroingVoltage = numberParameter(device, 'zeroingVoltage', -2);
   const zeroingCurrent = numberParameter(device, 'zeroingCurrent', 40);
+  const zeroingFilterSize = numberParameter(device, 'zeroingFilterSize', 5);
+  const zeroOffset = numberParameter(device, 'zeroOffset', 0);
   const tolerance = numberParameter(device, 'tolerance', 0.01);
   const leaderId = stringParameter(device, 'leaderId');
   const leader = model.devices.find((entry) => entry.id === leaderId);
@@ -412,10 +512,15 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
       : [
           `${indentation}.gravityType(${stringExpression(model, device, 'gravityType', gravityType)})`,
         ]),
+    ...(parameter(device, 'staticFeedforwardSign') === undefined
+      ? []
+      : [
+          `${indentation}.staticFeedforwardSign(${stringExpression(model, device, 'staticFeedforwardSign', staticFeedforwardSign)})`,
+        ]),
     ...(parameter(device, 'remoteEncoderEnabled') === undefined
       ? []
       : [
-          `${indentation}.remoteEncoder(new MotorConfiguration.RemoteEncoder(${booleanExpression(model, device, 'remoteEncoderEnabled', remoteEnabled)}, (int) ${numberExpression(model, device, 'remoteEncoderId', remoteId)}, ${numberExpression(model, device, 'rotorToSensorRatio', rotorRatio)}, ${stringExpression(model, device, 'feedbackSource', feedbackSource)}))`,
+          `${indentation}.remoteEncoder(new MotorConfiguration.RemoteEncoder(${booleanExpression(model, device, 'remoteEncoderEnabled', remoteEnabled)}, (int) ${numberExpression(model, device, 'remoteEncoderId', remoteId)}, ${stringExpression(model, device, 'remoteEncoderCanBus', remoteCanBus)}, ${numberExpression(model, device, 'remoteEncoderMagnetOffset', remoteMagnetOffset)}, ${stringExpression(model, device, 'remoteEncoderSensorDirection', remoteSensorDirection)}, ${numberExpression(model, device, 'rotorToSensorRatio', rotorRatio)}, ${stringExpression(model, device, 'feedbackSource', feedbackSource)}))`,
         ]),
     ...(parameter(device, 'continuousWrap') === undefined
       ? []
@@ -427,6 +532,11 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
           `${indentation}.softLimits(new MotorConfiguration.SoftLimits(${booleanExpression(model, device, 'reverseSoftLimitEnabled', reverseEnabled)}, ${numberExpression(model, device, 'reverseSoftLimit', reverse)}, ${booleanExpression(model, device, 'forwardSoftLimitEnabled', forwardEnabled)}, ${numberExpression(model, device, 'forwardSoftLimit', forward)}))`,
         ]
       : []),
+    ...(parameter(device, 'zeroOffset') === undefined
+      ? []
+      : [
+          `${indentation}.zeroOffsetRotations(${numberExpression(model, device, 'zeroOffset', zeroOffset)})`,
+        ]),
     ...(parameter(device, 'motionMagicVelocity') === undefined &&
     parameter(device, 'motionMagicAcceleration') === undefined &&
     parameter(device, 'motionMagicJerk') === undefined
@@ -435,10 +545,11 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
           `${indentation}.motionMagic(new MotorConfiguration.MotionMagic(${numberExpression(model, device, 'motionMagicVelocity', motionVelocity)}, ${numberExpression(model, device, 'motionMagicAcceleration', motionAcceleration)}, ${numberExpression(model, device, 'motionMagicJerk', motionJerk)}))`,
         ]),
     ...(parameter(device, 'zeroingVoltage') === undefined &&
-    parameter(device, 'zeroingCurrent') === undefined
+    parameter(device, 'zeroingCurrent') === undefined &&
+    parameter(device, 'zeroingFilterSize') === undefined
       ? []
       : [
-          `${indentation}.zeroing(new MotorConfiguration.Zeroing(${numberExpression(model, device, 'zeroingVoltage', zeroingVoltage)}, ${numberExpression(model, device, 'zeroingCurrent', zeroingCurrent)}))`,
+          `${indentation}.zeroing(new MotorConfiguration.Zeroing(${numberExpression(model, device, 'zeroingVoltage', zeroingVoltage)}, ${numberExpression(model, device, 'zeroingCurrent', zeroingCurrent)}, (int) ${numberExpression(model, device, 'zeroingFilterSize', zeroingFilterSize)}))`,
         ]),
     ...(parameter(device, 'tolerance') === undefined
       ? []
@@ -642,21 +753,27 @@ function stateMachineDeclaration(
 }
 
 function robotContainerJava(model: FrcProjectModel): string {
-  const systemRoots = dependencyOrder(roots(model));
-  const imports = systemRoots.map((entry) => {
-    const packageName =
-      entry.javaPackage ?? `${model.project.javaPackage}.subsystems.${lowerFirst(entry.symbol)}`;
-    return `import ${packageName}.${entry.symbol};`;
-  });
+  const nodes = compositionOrder(model);
+  const symbolCounts = new Map<string, number>();
+  for (const node of nodes) symbolCounts.set(node.symbol, (symbolCounts.get(node.symbol) ?? 0) + 1);
+  const imports = nodes
+    .filter((entry) => symbolCounts.get(entry.symbol) === 1)
+    .map((entry) => {
+      const location = subsystemJavaLocation(model, entry);
+      return `import ${location.packageName}.${entry.symbol};`;
+    });
   const calibrationMotors = model.devices
     .filter((device) => device.kind === 'motor')
     .flatMap((device) => {
-      let owner = model.subsystems.find((entry) => entry.id === device.parentId);
-      while (owner?.parentId !== undefined)
-        owner = model.subsystems.find((entry) => entry.id === owner?.parentId);
-      return owner === undefined || owner.javaFile !== undefined
+      const owner = model.subsystems.find((entry) => entry.id === device.parentId);
+      return owner === undefined || presetOwnsDevice(model, owner, device)
         ? []
-        : [{ device, expression: `${lowerFirst(owner.symbol)}.${lowerFirst(device.symbol)}()` }];
+        : [
+            {
+              device,
+              expression: `${compositionFieldName(model, owner)}.${lowerFirst(device.symbol)}()`,
+            },
+          ];
     });
   return `package ${model.project.javaPackage};
 
@@ -671,19 +788,26 @@ ${imports.length === 0 ? '' : `${imports.join('\n')}\n`}
 /** Readable composition root. Robot-specific behavior belongs in the packages below. */
 public final class RobotContainer {
     // <frc-framework:managed>
-${systemRoots
+${nodes
   .map((entry) => {
-    const argumentsList = (entry.dependencies ?? [])
-      .map((dependency) =>
-        model.subsystems.find((candidate) => candidate.id === dependency.targetSubsystemId),
-      )
-      .filter((target): target is Subsystem => target !== undefined)
-      .map((target) => lowerFirst(target.symbol));
-    return `    private final ${entry.symbol} ${lowerFirst(entry.symbol)} = new ${entry.symbol}(${argumentsList.join(', ')});`;
+    const argumentsList = [
+      ...children(model, entry.id).map((child) => compositionFieldName(model, child)),
+      ...(entry.dependencies ?? [])
+        .map((dependency) =>
+          model.subsystems.find((candidate) => candidate.id === dependency.targetSubsystemId),
+        )
+        .filter((target): target is Subsystem => target !== undefined)
+        .map((target) => compositionFieldName(model, target)),
+    ];
+    const type =
+      symbolCounts.get(entry.symbol) === 1
+        ? entry.symbol
+        : `${subsystemJavaLocation(model, entry).packageName}.${entry.symbol}`;
+    return `    private final ${type} ${compositionFieldName(model, entry)} = new ${type}(${argumentsList.join(', ')});`;
   })
-  .join('\n')}${systemRoots.length === 0 ? '    // No robot subsystems are configured.' : ''}
-    private final RobotCommands commands = new RobotCommands(${commandRequirementRoots(model)
-      .map((entry) => lowerFirst(entry.symbol))
+  .join('\n')}${nodes.length === 0 ? '    // No robot subsystems are configured.' : ''}
+    private final RobotCommands commands = new RobotCommands(${commandRequirements(model)
+      .map((entry) => compositionFieldName(model, entry))
       .join(', ')});
     private final OperatorInterface operatorInterface = new OperatorInterface();
     private final AutoManager autoManager = new AutoManager();
@@ -1008,12 +1132,21 @@ ${
 }
 
 function robotCommandsJava(model: FrcProjectModel): string {
-  const requirements = commandRequirementRoots(model);
-  const imports = requirements.map((entry) => {
-    const packageName =
-      entry.javaPackage ?? `${model.project.javaPackage}.subsystems.${lowerFirst(entry.symbol)}`;
-    return `import ${packageName}.${entry.symbol};`;
-  });
+  const requirements = commandRequirements(model);
+  const symbolCounts = new Map<string, number>();
+  for (const requirement of requirements)
+    symbolCounts.set(requirement.symbol, (symbolCounts.get(requirement.symbol) ?? 0) + 1);
+  const imports = requirements
+    .filter((entry) => symbolCounts.get(entry.symbol) === 1)
+    .map((entry) => {
+      const location = subsystemJavaLocation(model, entry);
+      return `import ${location.packageName}.${entry.symbol};`;
+    });
+  const typeName = (entry: Subsystem): string =>
+    symbolCounts.get(entry.symbol) === 1
+      ? entry.symbol
+      : `${subsystemJavaLocation(model, entry).packageName}.${entry.symbol}`;
+  const fieldName = (entry: Subsystem): string => compositionFieldName(model, entry);
   const commands = [...model.commands].sort((left, right) =>
     left.symbol.localeCompare(right.symbol),
   );
@@ -1025,10 +1158,10 @@ ${imports.join('\n')}${imports.length === 0 ? '' : '\n'}
 /** Factory methods for commands that coordinate one or more subsystems. */
 public final class RobotCommands {
     // <frc-framework:managed>
-${requirements.map((entry) => `    private final ${entry.symbol} ${lowerFirst(entry.symbol)};`).join('\n')}${requirements.length === 0 ? '    // No subsystem dependencies configured.' : ''}
+${requirements.map((entry) => `    private final ${typeName(entry)} ${fieldName(entry)};`).join('\n')}${requirements.length === 0 ? '    // No subsystem dependencies configured.' : ''}
 
-    public RobotCommands(${requirements.map((entry) => `${entry.symbol} ${lowerFirst(entry.symbol)}`).join(', ')}) {
-${requirements.map((entry) => `        this.${lowerFirst(entry.symbol)} = ${lowerFirst(entry.symbol)};`).join('\n')}${requirements.length === 0 ? '        // No dependencies.' : ''}
+    public RobotCommands(${requirements.map((entry) => `${typeName(entry)} ${fieldName(entry)}`).join(', ')}) {
+${requirements.map((entry) => `        this.${fieldName(entry)} = ${fieldName(entry)};`).join('\n')}${requirements.length === 0 ? '        // No dependencies.' : ''}
     }
 
     public void configureDefaults() {
@@ -1076,15 +1209,9 @@ function commandFactoryJava(
     }`;
 }
 
-function commandRequirementRoots(model: FrcProjectModel): readonly Subsystem[] {
+function commandRequirements(model: FrcProjectModel): readonly Subsystem[] {
   const ids = new Set(model.commands.flatMap((command) => command.requirementIds));
-  const result = roots(model).filter((root) => {
-    const descendantsIds = new Set([
-      root.id,
-      ...descendants(model, root.id).map((entry) => entry.id),
-    ]);
-    return [...ids].some((id) => descendantsIds.has(id));
-  });
+  const result = model.subsystems.filter((entry) => ids.has(entry.id));
   return dependencyOrder(result);
 }
 
@@ -1103,6 +1230,51 @@ function dependencyOrder(input: readonly Subsystem[]): readonly Subsystem[] {
   };
   [...input].sort((left, right) => left.symbol.localeCompare(right.symbol)).forEach(visit);
   return result;
+}
+
+function compositionOrder(model: FrcProjectModel): readonly Subsystem[] {
+  const result: Subsystem[] = [];
+  const completed = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = (node: Subsystem): void => {
+    if (completed.has(node.id)) return;
+    if (visiting.has(node.id)) {
+      throw new Error(
+        `Subsystem composition contains a cycle at ${node.displayName}; remove a parent/dependency loop.`,
+      );
+    }
+    visiting.add(node.id);
+    for (const child of children(model, node.id)) visit(child);
+    for (const dependency of node.dependencies ?? []) {
+      const target = model.subsystems.find((entry) => entry.id === dependency.targetSubsystemId);
+      if (target !== undefined) visit(target);
+    }
+    visiting.delete(node.id);
+    completed.add(node.id);
+    result.push(node);
+  };
+  for (const root of roots(model)) visit(root);
+  for (const node of [...model.subsystems].sort((left, right) =>
+    left.symbol.localeCompare(right.symbol),
+  ))
+    visit(node);
+  return result;
+}
+
+function compositionFieldName(model: FrcProjectModel, node: Subsystem): string {
+  if (model.subsystems.filter((entry) => entry.symbol === node.symbol).length === 1)
+    return lowerFirst(node.symbol);
+  const path: string[] = [node.symbol];
+  let cursor = node;
+  const visited = new Set<string>([node.id]);
+  while (cursor.parentId !== undefined) {
+    const parent = model.subsystems.find((entry) => entry.id === cursor.parentId);
+    if (parent === undefined || visited.has(parent.id)) break;
+    visited.add(parent.id);
+    path.unshift(parent.symbol);
+    cursor = parent;
+  }
+  return lowerFirst(path.join(''));
 }
 
 function hardwareMapDocument(model: FrcProjectModel): string {
@@ -1155,6 +1327,8 @@ ${definition.parameters.map((parameter) => `| ${parameter.displayName} | ${param
 
 Only components currently used by this robot are listed. FRC Framework stores ordinary project data; these types remain readable without the application.
 
+The compact compatibility API and motor parameter surface are maintained against the 2026 IronPulse code used by the 10541 offseason robot. It includes unit-based position/velocity aliases, remote CANcoder configuration, zero offset/filter settings, Motion Magic, live gain/current/limit updates, and explicit real/simulation IO while preserving FRC Framework's smaller standalone API.
+
 ${sections.length === 0 ? '_No catalog components are configured._' : sections.join('\n\n')}
 
 <!-- frc-framework:user-supplement:start -->
@@ -1164,12 +1338,19 @@ ${sections.length === 0 ? '_No catalog components are configured._' : sections.j
 }
 
 function subsystemsDocument(model: FrcProjectModel): string {
-  const lines = roots(model).flatMap((root) => [
-    `- **${root.displayName}** (\`${root.symbol}\`) — ${root.behaviorMode ?? 'direct'}; source: \`${root.javaFile ?? `${root.symbol}.java`}\`${(root.dependencies ?? []).length === 0 ? '' : `; depends on ${root.dependencies?.map((dependency) => model.subsystems.find((entry) => entry.id === dependency.targetSubsystemId)?.displayName ?? dependency.targetSubsystemId).join(', ')}`}`,
-    ...descendants(model, root.id).map(
-      (child) => `  - ${child.kind}: **${child.displayName}** (\`${child.symbol}\`)`,
-    ),
-  ]);
+  const lines = [...model.subsystems]
+    .sort((left, right) => parentPath(model, left.id).localeCompare(parentPath(model, right.id)))
+    .map((node) => {
+      const depth = subsystemDepth(model, node);
+      const dependencies = (node.dependencies ?? [])
+        .map(
+          (dependency) =>
+            model.subsystems.find((entry) => entry.id === dependency.targetSubsystemId)
+              ?.displayName ?? dependency.targetSubsystemId,
+        )
+        .join(', ');
+      return `${'  '.repeat(depth)}- ${node.kind}: **${node.displayName}** (\`${node.symbol}\`) — ${node.behaviorMode ?? 'direct'}; source: \`${subsystemJavaLocation(model, node).file}\`${dependencies.length === 0 ? '' : `; depends on ${dependencies}`}`;
+    });
   return `# Subsystems
 
 ${lines.length === 0 ? '_No subsystems configured._' : lines.join('\n')}
@@ -1357,7 +1538,7 @@ function stateModelDocument(model: FrcProjectModel): string {
     .filter((entry) => entry.stateMachine !== undefined)
     .map(
       (entry) =>
-        `## ${entry.displayName}\n\nGoals: ${entry.stateMachine?.states.map((state) => `\`${state.symbol}\``).join(', ') || '_none_'}\n\nA Goal is requested behavior; sensor-derived Status should remain ordinary Java and Commands perform transitions or coordination.`,
+        `## ${parentPath(model, entry.id)}\n\nSource: \`${subsystemJavaLocation(model, entry).file}\`\n\nGoals: ${entry.stateMachine?.states.map((state) => `\`${state.symbol}\``).join(', ') || '_none_'}\n\nA Goal is requested behavior; sensor-derived Status should remain ordinary Java and Commands perform transitions or coordination.`,
     );
   return `# State Model
 
@@ -1380,6 +1561,20 @@ function parentPath(model: FrcProjectModel, parentId: string): string {
         : model.subsystems.find((entry) => entry.id === cursor?.parentId);
   }
   return parts.join(' / ');
+}
+
+function subsystemDepth(model: FrcProjectModel, subsystem: Subsystem): number {
+  let depth = 0;
+  let cursor = subsystem;
+  const visited = new Set<string>();
+  while (cursor.parentId !== undefined && !visited.has(cursor.id)) {
+    visited.add(cursor.id);
+    const parent = model.subsystems.find((entry) => entry.id === cursor.parentId);
+    if (parent === undefined) break;
+    depth += 1;
+    cursor = parent;
+  }
+  return depth;
 }
 
 function parameter(device: Device, key: string): DeviceParameter | undefined {

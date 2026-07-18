@@ -10,6 +10,7 @@ import {
 
 describe('IronPulse component catalog', () => {
   it('has a versioned, unique definition and generator mapping for every component', () => {
+    expect(CATALOG_VERSION).toBe(2);
     expect(new Set(COMPONENT_CATALOG.map((entry) => entry.id)).size).toBe(COMPONENT_CATALOG.length);
     for (const definition of COMPONENT_CATALOG) {
       expect(definition.version).toBe(CATALOG_VERSION);
@@ -20,6 +21,22 @@ describe('IronPulse component catalog', () => {
         expect(parameter.mapping.javaPath).not.toBe('');
       }
     }
+  });
+
+  it('covers the current 10541 motor configuration surface with explanations', () => {
+    const motor = COMPONENT_CATALOG.find((entry) => entry.id === 'ironpulse.talonfx-primary');
+    const keys = motor?.parameters.map((entry) => entry.key) ?? [];
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'remoteEncoderCanBus',
+        'remoteEncoderMagnetOffset',
+        'remoteEncoderSensorDirection',
+        'staticFeedforwardSign',
+        'zeroOffset',
+        'zeroingFilterSize',
+      ]),
+    );
+    expect(motor?.parameters.every((parameter) => parameter.description.length > 20)).toBe(true);
   });
 
   it('instantiates only required, common, or explicitly selected parameters', () => {

@@ -228,7 +228,7 @@ export const en = {
   'structured.mechanism': 'Mechanism',
   'structured.mechanismName': 'Mechanism name',
   'structured.mechanismHelp':
-    'A Mechanism is a physical functional unit inside a Subsystem, such as Shooter Upper, Shooter Lower, an arm pivot, or one swerve module. Use it to group related motors, sensors, parameters, and setpoints; it does not have to create a separate Java subsystem.',
+    'A Mechanism is a nested physical unit with its own Java file, devices, goals, and local commands. Its parent keeps a typed reference, so the same structure works at any nesting depth.',
   'structured.name': 'Name',
   'structured.notes': 'Description / notes',
   'structured.noDevices': 'No devices are configured.',
@@ -548,7 +548,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'structured.mechanism': 'Mechanism',
   'structured.mechanismName': 'Mechanism 名称',
   'structured.mechanismHelp':
-    'Mechanism 是一个 Subsystem 内部的物理功能单元，例如 Shooter Upper、Shooter Lower、机械臂 Pivot 或单个 Swerve Module。它用来归组相关电机、传感器、参数与设定值，不一定生成独立的 Java Subsystem。',
+    'Mechanism 是拥有独立 Java 文件、设备、Goal 与本地命令的嵌套物理单元。父节点持有它的类型化引用，同一规则适用于任意嵌套深度。',
   'structured.name': '名称',
   'structured.notes': '说明 / 备注',
   'structured.noDevices': '还没有配置设备。',

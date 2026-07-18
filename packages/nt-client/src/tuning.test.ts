@@ -68,7 +68,7 @@ describe('NT tuning model', () => {
   it('resolves project declarations to narrow automatic topic paths', () => {
     const declarations = collectTuningParameters(fixture().model);
     expect(declarations).toHaveLength(1);
-    expect(declarations[0]?.path).toBe('/Tuning/Shooter/Upper/kP');
+    expect(declarations[0]?.path).toBe('/Tuning/Shooter/Upper/Flywheel/kP');
     expect(declarations[0]?.type).toBe('double');
   });
 
@@ -78,7 +78,10 @@ describe('NT tuning model', () => {
       compareTuningValues(
         declarations,
         new Map([
-          ['/Tuning/Shooter/Upper/kP', { type: 'double', updatedAtMillis: 9_500, value: 0.2005 }],
+          [
+            '/Tuning/Shooter/Upper/Flywheel/kP',
+            { type: 'double', updatedAtMillis: 9_500, value: 0.2005 },
+          ],
         ]),
         { nowMillis: 10_000 },
       )[0]?.state,
@@ -87,7 +90,10 @@ describe('NT tuning model', () => {
       compareTuningValues(
         declarations,
         new Map([
-          ['/Tuning/Shooter/Upper/kP', { type: 'double', updatedAtMillis: 9_500, value: 0.24 }],
+          [
+            '/Tuning/Shooter/Upper/Flywheel/kP',
+            { type: 'double', updatedAtMillis: 9_500, value: 0.24 },
+          ],
         ]),
         { nowMillis: 10_000 },
       )[0],
@@ -96,7 +102,10 @@ describe('NT tuning model', () => {
       compareTuningValues(
         declarations,
         new Map([
-          ['/Tuning/Shooter/Upper/kP', { type: 'string', updatedAtMillis: 9_500, value: 'bad' }],
+          [
+            '/Tuning/Shooter/Upper/Flywheel/kP',
+            { type: 'string', updatedAtMillis: 9_500, value: 'bad' },
+          ],
         ]),
         { nowMillis: 10_000 },
       )[0],
@@ -104,7 +113,9 @@ describe('NT tuning model', () => {
     expect(
       compareTuningValues(
         declarations,
-        new Map([['/Tuning/Shooter/Upper/kP', { type: 'double', updatedAtMillis: 1, value: 0.3 }]]),
+        new Map([
+          ['/Tuning/Shooter/Upper/Flywheel/kP', { type: 'double', updatedAtMillis: 1, value: 0.3 }],
+        ]),
         { nowMillis: 10_000 },
       )[0]?.state,
     ).toBe('stale');
@@ -112,7 +123,10 @@ describe('NT tuning model', () => {
       compareTuningValues(
         declarations,
         new Map([
-          ['/Tuning/Shooter/Upper/kP', { type: 'double', updatedAtMillis: 9_500, value: 3 }],
+          [
+            '/Tuning/Shooter/Upper/Flywheel/kP',
+            { type: 'double', updatedAtMillis: 9_500, value: 3 },
+          ],
         ]),
         { nowMillis: 10_000 },
       )[0],
@@ -124,7 +138,10 @@ describe('NT tuning model', () => {
     const comparisons = compareTuningValues(
       collectTuningParameters(model),
       new Map([
-        ['/Tuning/Shooter/Upper/kP', { type: 'double', updatedAtMillis: 9_500, value: 0.24 }],
+        [
+          '/Tuning/Shooter/Upper/Flywheel/kP',
+          { type: 'double', updatedAtMillis: 9_500, value: 0.24 },
+        ],
       ]),
       { nowMillis: 10_000 },
     );
@@ -150,7 +167,7 @@ describe('NT tuning model', () => {
     ).toMatchObject({
       capturedAt: '2026-01-01T00:00:00.000Z',
       name: 'Practice',
-      values: { '/Tuning/Shooter/Upper/kP': 0.24 },
+      values: { '/Tuning/Shooter/Upper/Flywheel/kP': 0.24 },
     });
     const snapshotted = executeCommand(
       model,

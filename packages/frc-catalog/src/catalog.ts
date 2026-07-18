@@ -8,7 +8,7 @@ import type {
 } from '@frc-framework/domain';
 import { createEntityId, javaSymbol } from '@frc-framework/domain';
 
-export const CATALOG_VERSION = 1 as const;
+export const CATALOG_VERSION = 2 as const;
 
 export type CatalogCategory =
   | 'identity'
@@ -95,6 +95,10 @@ const PARAMETER_DESCRIPTIONS: Readonly<Record<string, string>> = {
   leaderId: 'Entity ID of the primary motor followed by this controller.',
   length: 'Number of addressable LEDs connected to the output.',
   magnetOffset: 'Absolute encoder offset applied when the mechanism is at its known reference.',
+  remoteEncoderCanBus: 'CAN bus used by the remote CANcoder.',
+  remoteEncoderMagnetOffset:
+    'Absolute CANcoder offset applied before it is used as motor-controller feedback.',
+  remoteEncoderSensorDirection: 'Defines which remote CANcoder rotation is reported as positive.',
   motionMagicAcceleration: 'Maximum acceleration used by the Motion Magic profile.',
   motionMagicJerk: 'Maximum rate of acceleration change used by the Motion Magic profile.',
   motionMagicVelocity: 'Maximum cruise velocity used by the Motion Magic profile.',
@@ -110,6 +114,8 @@ const PARAMETER_DESCRIPTIONS: Readonly<Record<string, string>> = {
   sensorDirection: 'Defines which absolute-encoder rotation is reported as positive.',
   sensorToMechanismRatio:
     'Sensor rotations per one mechanism rotation; converts sensor units to mechanism units.',
+  staticFeedforwardSign:
+    'Controls whether Phoenix applies kS from the closed-loop error or velocity direction.',
   setpoints: 'Named mechanism targets such as HOME=0 or SPEAKER=85.',
   setpointUnit: 'Physical unit used by named setpoints and at-goal comparisons.',
   simFrictionVoltage: 'Simulated voltage required to overcome static mechanism friction.',
@@ -123,6 +129,10 @@ const PARAMETER_DESCRIPTIONS: Readonly<Record<string, string>> = {
   tolerance: 'Maximum permitted error for reporting that the mechanism is at its goal.',
   zeroingCurrent:
     'Current threshold that indicates the mechanism has reached its hard stop while homing.',
+  zeroingFilterSize:
+    'Moving-average sample count used to reject current spikes while finding a hard stop.',
+  zeroOffset:
+    'Difference between the mechanism zero and the motor-controller zero, in mechanism rotations.',
   zeroingVoltage: 'Low voltage applied while moving toward the mechanism home reference.',
 };
 
@@ -149,6 +159,41 @@ const motorParameters: readonly CatalogParameterDefinition[] = [
     'inverted',
     {
       common: true,
+      enumValues: ['counterClockwisePositive', 'clockwisePositive'],
+    },
+  ),
+  parameter(
+    'remoteEncoderCanBus',
+    'Remote CANcoder bus',
+    'feedback',
+    'string',
+    'rio',
+    'remoteEncoder.canBus',
+    { condition: { equals: true, parameter: 'remoteEncoderEnabled' } },
+  ),
+  parameter(
+    'remoteEncoderMagnetOffset',
+    'Remote magnet offset',
+    'feedback',
+    'number',
+    0,
+    'remoteEncoder.magnetOffset',
+    {
+      condition: { equals: true, parameter: 'remoteEncoderEnabled' },
+      maximum: 0.5,
+      minimum: -0.5,
+      unit: 'rot',
+    },
+  ),
+  parameter(
+    'remoteEncoderSensorDirection',
+    'Remote sensor direction',
+    'feedback',
+    'enum',
+    'counterClockwisePositive',
+    'remoteEncoder.sensorDirection',
+    {
+      condition: { equals: true, parameter: 'remoteEncoderEnabled' },
       enumValues: ['counterClockwisePositive', 'clockwisePositive'],
     },
   ),
@@ -261,6 +306,15 @@ const motorParameters: readonly CatalogParameterDefinition[] = [
     enumValues: ['elevatorStatic', 'armCosine'],
   }),
   parameter(
+    'staticFeedforwardSign',
+    'Static feedforward sign',
+    'control',
+    'enum',
+    'closedLoopSign',
+    'staticFeedforwardSign',
+    { enumValues: ['closedLoopSign', 'velocitySign'] },
+  ),
+  parameter(
     'forwardSoftLimitEnabled',
     'Forward soft limit',
     'limits',
@@ -297,6 +351,22 @@ const motorParameters: readonly CatalogParameterDefinition[] = [
     minimum: 0,
     tunable: true,
     unit: 'A',
+  }),
+  parameter(
+    'zeroingFilterSize',
+    'Zeroing filter size',
+    'limits',
+    'number',
+    5,
+    'zeroing.filterSize',
+    {
+      maximum: 100,
+      minimum: 1,
+    },
+  ),
+  parameter('zeroOffset', 'Zero offset', 'limits', 'number', 0, 'zeroOffset', {
+    tunable: true,
+    unit: 'rot',
   }),
   parameter(
     'motionMagicVelocity',

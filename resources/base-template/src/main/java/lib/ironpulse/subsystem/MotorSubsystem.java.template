@@ -1,5 +1,6 @@
 package lib.ironpulse.subsystem;
 
+import static edu.wpi.first.units.Units.Amps;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
@@ -7,6 +8,7 @@ import lib.ironpulse.io.MotorIO;
 import lib.ironpulse.io.MotorInputsAutoLogged;
 import org.littletonrobotics.junction.Logger;
 import java.util.function.BooleanSupplier;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
 import static edu.wpi.first.units.Units.Volts;
@@ -46,7 +48,7 @@ public class MotorSubsystem extends SubsystemBase {
             MotorConfiguration configuration = configurationSupplier.get();
             if (configuration != null) io.applyConfiguration(configuration);
         }
-        io.updateInputs(inputs);
+        io.readInputs(inputs);
         Logger.processInputs(logPath, inputs);
     }
 
@@ -54,8 +56,26 @@ public class MotorSubsystem extends SubsystemBase {
         return runEnd(() -> io.setDutyCycle(output), io::stop).withName(getName() + ".dutyCycle");
     }
 
+    public Command runDutyCycle(double output) {
+        return dutyCycleCommand(output);
+    }
+
+    public Command runDutyCycle(DoubleSupplier output) {
+        return runEnd(() -> io.setDutyCycle(output.getAsDouble()), io::stop)
+                .withName(getName() + ".dutyCycle");
+    }
+
     public Command voltageCommand(double volts) {
         return runEnd(() -> io.setVoltage(volts), io::stop).withName(getName() + ".voltage");
+    }
+
+    public Command runVoltage(double volts) {
+        return voltageCommand(volts);
+    }
+
+    public Command runVoltage(DoubleSupplier volts) {
+        return runEnd(() -> io.setVoltage(volts.getAsDouble()), io::stop)
+                .withName(getName() + ".voltage");
     }
 
     public Command positionCommand(double rotations) {
@@ -69,6 +89,34 @@ public class MotorSubsystem extends SubsystemBase {
 
     public Command stopCommand() {
         return runOnce(io::stop).withName(getName() + ".stop");
+    }
+
+    public Command runStop() {
+        return stopCommand();
+    }
+
+    public Command setNeutralMode(boolean wantsBrake) {
+        return runOnce(() -> io.setNeutralMode(wantsBrake));
+    }
+
+    public Command setCurrentLimits(double statorCurrentAmps, double supplyCurrentAmps) {
+        return runOnce(() -> io.setCurrentLimits(statorCurrentAmps, supplyCurrentAmps));
+    }
+
+    public edu.wpi.first.units.measure.Current getStatorCurrent() {
+        return Amps.of(inputs.currentStatorAmps);
+    }
+
+    public edu.wpi.first.units.measure.Current getSupplyCurrent() {
+        return Amps.of(inputs.currentSupplyAmps);
+    }
+
+    public edu.wpi.first.units.measure.Voltage getMotorVoltage() {
+        return Volts.of(inputs.motorVolts);
+    }
+
+    public boolean isConnected() {
+        return io.isConnected();
     }
 
     public boolean atPosition(double rotations, double tolerance) {

@@ -1,4 +1,10 @@
-import type { FrcProjectModel, ParameterValue, PresetInstance } from '@frc-framework/domain';
+import { subsystemJavaLocation } from '@frc-framework/domain';
+import type {
+  FrcProjectModel,
+  ParameterValue,
+  PresetInstance,
+  Subsystem,
+} from '@frc-framework/domain';
 
 export type PresetGeneratedFiles = ReadonlyMap<string, string>;
 
@@ -9,12 +15,12 @@ export function generatePresetFiles(model: FrcProjectModel): PresetGeneratedFile
     left.presetId.localeCompare(right.presetId),
   )) {
     if (preset.presetId === 'frc.swerve') {
-      for (const [relative, content] of generateSwerve(model.project.javaPackage, preset)) {
+      for (const [relative, content] of generateSwerve(model, preset)) {
         files.set(`src/main/java/${packagePath}/subsystems/swerve/${relative}`, content);
       }
       files.set('docs/SWERVE.md', swerveDocument(preset));
     } else if (preset.presetId === 'frc.limelight') {
-      for (const [relative, content] of generateLimelight(model.project.javaPackage, preset)) {
+      for (const [relative, content] of generateLimelight(model, preset)) {
         files.set(`src/main/java/${packagePath}/subsystems/vision/${relative}`, content);
       }
       files.set('docs/LIMELIGHT.md', limelightDocument(preset));
@@ -55,8 +61,19 @@ ${Object.entries(preset.parameters)
 `;
 }
 
-function generateSwerve(rootPackage: string, preset: PresetInstance): ReadonlyMap<string, string> {
+function generateSwerve(
+  model: FrcProjectModel,
+  preset: PresetInstance,
+): ReadonlyMap<string, string> {
+  const rootPackage = model.project.javaPackage;
   const packageName = `${rootPackage}.subsystems.swerve`;
+  const root = model.subsystems.find(
+    (entry) =>
+      entry.javaFile?.replace(/\\/gu, '/').endsWith('/subsystems/swerve/SwerveSubsystem.java') ===
+      true,
+  );
+  const composition =
+    root === undefined ? emptyPresetComposition() : presetComposition(model, root);
   const wheelbase = numberValue(preset, 'wheelbase');
   const trackwidth = numberValue(preset, 'trackwidth');
   const wheelRadius = numberValue(preset, 'wheelRadius');
@@ -365,6 +382,7 @@ import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import java.util.function.DoubleSupplier;
+${composition.imports.length === 0 ? '' : `${composition.imports.join('\n')}\n`}
 
 /** Complete field-relative swerve drive generated from project.yaml. */
 public final class SwerveSubsystem extends SubsystemBase {
@@ -374,8 +392,10 @@ public final class SwerveSubsystem extends SubsystemBase {
     private final GyroIO.Inputs gyroInputs = new GyroIO.Inputs();
     private final SwerveDriveKinematics kinematics = new SwerveDriveKinematics(SwerveConfig.MODULE_LOCATIONS);
     private final SwerveDriveOdometry odometry;
+${composition.fields.length === 0 ? '' : `${composition.fields.join('\n')}\n`}
 
-    public SwerveSubsystem() {
+    public SwerveSubsystem(${composition.parameters.join(', ')}) {
+${composition.assignments.length === 0 ? '' : `${composition.assignments.join('\n')}\n`}
         gyro = RobotBase.isReal() ? new GyroIOPigeon2() : new GyroIOSim();
         for (int index = 0; index < modules.length; index++) {
             modules[index] = RobotBase.isReal() ? new SwerveModuleIOTalonFX(index) : new SwerveModuleIOSim();
@@ -448,6 +468,8 @@ public final class SwerveSubsystem extends SubsystemBase {
         for (SwerveModuleIO module : modules) module.stop();
     }
 
+${composition.accessors.join('\n\n')}${composition.accessors.length === 0 ? '' : '\n\n'}${root === undefined ? '' : presetGoalJava(root)}
+
     private void configurePathPlanner() {
         try {
             AutoBuilder.configure(
@@ -479,11 +501,100 @@ public final class SwerveSubsystem extends SubsystemBase {
   return files;
 }
 
+interface PresetComposition {
+  readonly imports: readonly string[];
+  readonly fields: readonly string[];
+  readonly parameters: readonly string[];
+  readonly assignments: readonly string[];
+  readonly accessors: readonly string[];
+}
+
+function emptyPresetComposition(): PresetComposition {
+  return { accessors: [], assignments: [], fields: [], imports: [], parameters: [] };
+}
+
+function presetComposition(model: FrcProjectModel, root: Subsystem): PresetComposition {
+  const packageName = subsystemJavaLocation(model, root).packageName;
+  const children = model.subsystems
+    .filter((entry) => entry.parentId === root.id)
+    .sort((left, right) => left.symbol.localeCompare(right.symbol));
+  const dependencies = (root.dependencies ?? [])
+    .map((dependency) => ({
+      ...dependency,
+      target: model.subsystems.find((entry) => entry.id === dependency.targetSubsystemId),
+    }))
+    .filter((entry): entry is typeof entry & { target: Subsystem } => entry.target !== undefined);
+  const imports = [...children, ...dependencies.map((entry) => entry.target)]
+    .map((entry) => subsystemJavaLocation(model, entry))
+    .filter((location) => location.packageName !== packageName)
+    .map((location) => `import ${location.packageName}.${location.className};`);
+  return {
+    accessors: children.map(
+      (child) =>
+        `    public ${child.symbol} ${lowerFirst(child.symbol)}() {\n        return ${lowerFirst(child.symbol)};\n    }`,
+    ),
+    assignments: [
+      ...children.map(
+        (child) => `        this.${lowerFirst(child.symbol)} = ${lowerFirst(child.symbol)};`,
+      ),
+      ...dependencies.map(
+        (dependency) => `        this.${dependency.fieldName} = ${dependency.fieldName};`,
+      ),
+    ],
+    fields: [
+      ...children.map((child) => `    private final ${child.symbol} ${lowerFirst(child.symbol)};`),
+      ...dependencies.map(
+        (dependency) => `    private final ${dependency.target.symbol} ${dependency.fieldName};`,
+      ),
+    ],
+    imports: [...new Set(imports)].sort(),
+    parameters: [
+      ...children.map((child) => `${child.symbol} ${lowerFirst(child.symbol)}`),
+      ...dependencies.map((dependency) => `${dependency.target.symbol} ${dependency.fieldName}`),
+    ],
+  };
+}
+
+function presetGoalJava(root: Subsystem): string {
+  const states = [...(root.stateMachine?.states ?? [])].sort((left, right) =>
+    left.symbol.localeCompare(right.symbol),
+  );
+  if (states.length === 0) return '';
+  const initial = states.find((state) => state.initial === true) ?? states[0];
+  return `    public enum Goal {
+        ${states.map((state) => camelToUpperSnake(state.symbol)).join(',\n        ')}
+    }
+
+    private Goal goal = Goal.${camelToUpperSnake(initial?.symbol ?? 'Idle')};
+
+    public Goal goal() {
+        return goal;
+    }
+
+    public void setGoal(Goal value) {
+        goal = value;
+    }
+
+    public Command setGoalCommand(Goal value) {
+        return runOnce(() -> setGoal(value));
+    }
+`;
+}
+
 function generateLimelight(
-  rootPackage: string,
+  model: FrcProjectModel,
   preset: PresetInstance,
 ): ReadonlyMap<string, string> {
+  const rootPackage = model.project.javaPackage;
   const packageName = `${rootPackage}.subsystems.vision`;
+  const root = model.subsystems.find(
+    (entry) =>
+      entry.javaFile
+        ?.replace(/\\/gu, '/')
+        .endsWith('/subsystems/vision/LimelightSubsystem.java') === true,
+  );
+  const composition =
+    root === undefined ? emptyPresetComposition() : presetComposition(model, root);
   const table = stringValue(preset, 'table');
   const pipeline = numberValue(preset, 'pipeline');
   const streamMode = numberValueOr(preset, 'streamMode', 0);
@@ -592,16 +703,19 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj2.command.SubsystemBase;
+${(root?.stateMachine?.states.length ?? 0) > 0 ? 'import edu.wpi.first.wpilibj2.command.Command;\n' : ''}import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import java.util.Optional;
+${composition.imports.length === 0 ? '' : `${composition.imports.join('\n')}\n`}
 
 /** Limelight targeting and localization facade generated from project.yaml. */
 public final class LimelightSubsystem extends SubsystemBase {
     private static final double STALE_AFTER_SECONDS = 0.25;
     private final LimelightIO io;
     private final LimelightIO.Inputs inputs = new LimelightIO.Inputs();
+${composition.fields.length === 0 ? '' : `${composition.fields.join('\n')}\n`}
 
-    public LimelightSubsystem() {
+    public LimelightSubsystem(${composition.parameters.join(', ')}) {
+${composition.assignments.length === 0 ? '' : `${composition.assignments.join('\n')}\n`}
         io = RobotBase.isReal() ? new LimelightIONetworkTables() : new LimelightIOSim();
     }
 
@@ -643,6 +757,8 @@ public final class LimelightSubsystem extends SubsystemBase {
         if (streamMode < 0 || streamMode > 2) throw new IllegalArgumentException("stream mode must be between 0 and 2");
         io.setStreamMode(streamMode);
     }
+
+${composition.accessors.join('\n\n')}${composition.accessors.length === 0 ? '' : '\n\n'}${root === undefined ? '' : presetGoalJava(root)}
 }
 `,
   );
@@ -754,4 +870,16 @@ function javaNumber(value: number): string {
 
 function escapeJava(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+}
+
+function lowerFirst(value: string): string {
+  return `${value.slice(0, 1).toLowerCase()}${value.slice(1)}`;
+}
+
+function camelToUpperSnake(value: string): string {
+  return value
+    .replace(/([a-z\d])([A-Z])/gu, '$1_$2')
+    .replace(/[^A-Za-z\d]+/gu, '_')
+    .replace(/^_+|_+$/gu, '')
+    .toUpperCase();
 }

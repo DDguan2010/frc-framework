@@ -1,17 +1,34 @@
 package lib.ironpulse.io;
 
-import com.ctre.phoenix6.configs.TalonFXConfiguration;
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.RotationsPerSecond;
+
 import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.configs.CANcoderConfiguration;
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.MotionMagicConfigs;
+import com.ctre.phoenix6.configs.Slot0Configs;
+import com.ctre.phoenix6.configs.SoftwareLimitSwitchConfigs;
+import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.controls.Follower;
+import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.controls.PositionVoltage;
+import com.ctre.phoenix6.controls.VelocityTorqueCurrentFOC;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.controls.VoltageOut;
+import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.FeedbackSensorSourceValue;
 import com.ctre.phoenix6.signals.GravityTypeValue;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
+import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.ctre.phoenix6.signals.SensorDirectionValue;
+import com.ctre.phoenix6.signals.StaticFeedforwardSignValue;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Voltage;
 import lib.ironpulse.subsystem.MotorConfiguration;
 
 /** Phoenix 6 TalonFX adapter with the commonly configured IronPulse parameters. */
@@ -20,7 +37,9 @@ public final class MotorIOTalonFX implements MotorIO {
     private final DutyCycleOut dutyCycle = new DutyCycleOut(0.0);
     private final VoltageOut voltage = new VoltageOut(0.0);
     private final PositionVoltage position = new PositionVoltage(0.0);
+    private final MotionMagicVoltage motionMagic = new MotionMagicVoltage(0.0);
     private final VelocityVoltage velocity = new VelocityVoltage(0.0);
+    private final VelocityTorqueCurrentFOC torqueVelocity = new VelocityTorqueCurrentFOC(0.0);
 
     public MotorIOTalonFX(MotorConfiguration config) {
         motor = new TalonFX(config.canId(), new CANBus(config.canBus()));
@@ -49,7 +68,23 @@ public final class MotorIOTalonFX implements MotorIO {
                 config.gravityType().equals("armCosine")
                         ? GravityTypeValue.Arm_Cosine
                         : GravityTypeValue.Elevator_Static;
+        phoenix.Slot0.StaticFeedforwardSign =
+                config.staticFeedforwardSign().equals("velocitySign")
+                        ? StaticFeedforwardSignValue.UseVelocitySign
+                        : StaticFeedforwardSignValue.UseClosedLoopSign;
         if (config.remoteEncoder().enabled()) {
+            CANcoder encoder =
+                    new CANcoder(
+                            config.remoteEncoder().canId(),
+                            new CANBus(config.remoteEncoder().canBus()));
+            CANcoderConfiguration encoderConfiguration = new CANcoderConfiguration();
+            encoderConfiguration.MagnetSensor.MagnetOffset =
+                    config.remoteEncoder().magnetOffsetRotations();
+            encoderConfiguration.MagnetSensor.SensorDirection =
+                    config.remoteEncoder().sensorDirection().equals("clockwisePositive")
+                            ? SensorDirectionValue.Clockwise_Positive
+                            : SensorDirectionValue.CounterClockwise_Positive;
+            encoder.getConfigurator().apply(encoderConfiguration);
             phoenix.Feedback.FeedbackRemoteSensorID = config.remoteEncoder().canId();
             phoenix.Feedback.RotorToSensorRatio = config.remoteEncoder().rotorToSensorRatio();
             phoenix.Feedback.FeedbackSensorSource =
@@ -70,12 +105,12 @@ public final class MotorIOTalonFX implements MotorIO {
         if (config.softLimits().forwardEnabled()) {
             phoenix.SoftwareLimitSwitch.ForwardSoftLimitEnable = true;
             phoenix.SoftwareLimitSwitch.ForwardSoftLimitThreshold =
-                    config.softLimits().forwardRotations();
+                    config.softLimits().forwardRotations() - config.zeroOffsetRotations();
         }
         if (config.softLimits().reverseEnabled()) {
             phoenix.SoftwareLimitSwitch.ReverseSoftLimitEnable = true;
             phoenix.SoftwareLimitSwitch.ReverseSoftLimitThreshold =
-                    config.softLimits().reverseRotations();
+                    config.softLimits().reverseRotations() - config.zeroOffsetRotations();
         }
         phoenix.MotionMagic.MotionMagicCruiseVelocity =
                 config.motionMagic().velocityRotationsPerSecond();
@@ -125,7 +160,77 @@ public final class MotorIOTalonFX implements MotorIO {
     }
 
     @Override
+    public void setMotionMagicSetpoint(
+            Angle setpoint, double velocity, double acceleration, double jerk) {
+        motor.getConfigurator()
+                .apply(
+                        new MotionMagicConfigs()
+                                .withMotionMagicCruiseVelocity(velocity)
+                                .withMotionMagicAcceleration(acceleration)
+                                .withMotionMagicJerk(jerk));
+        motor.setControl(motionMagic.withPosition(setpoint.in(Rotations)));
+    }
+
+    @Override
+    public void setVelVoltSetpoint(
+            AngularVelocity setpoint, Voltage feedForwardVoltage) {
+        motor.setControl(
+                velocity
+                        .withVelocity(setpoint.in(RotationsPerSecond))
+                        .withFeedForward(feedForwardVoltage));
+    }
+
+    @Override
+    public void setVelTCSetpoint(
+            AngularVelocity setpoint, Current feedForwardTorqueCurrent) {
+        motor.setControl(
+                torqueVelocity
+                        .withVelocity(setpoint.in(RotationsPerSecond))
+                        .withFeedForward(feedForwardTorqueCurrent));
+    }
+
+    @Override
     public void zeroPosition() {
         motor.setPosition(0.0);
+    }
+
+    @Override
+    public void setCurrentPositionRotations(double rotations) {
+        motor.setPosition(rotations);
+    }
+
+    @Override
+    public void setNeutralMode(boolean wantsBrake) {
+        motor.setNeutralMode(wantsBrake ? NeutralModeValue.Brake : NeutralModeValue.Coast);
+    }
+
+    @Override
+    public void setEnableSoftLimits(boolean forward, boolean reverse) {
+        motor.getConfigurator()
+                .apply(
+                        new SoftwareLimitSwitchConfigs()
+                                .withForwardSoftLimitEnable(forward)
+                                .withReverseSoftLimitEnable(reverse));
+    }
+
+    @Override
+    public void setCurrentLimits(double statorCurrentLimitAmps, double supplyCurrentLimitAmps) {
+        motor.getConfigurator()
+                .apply(
+                        new CurrentLimitsConfigs()
+                                .withStatorCurrentLimit(statorCurrentLimitAmps)
+                                .withStatorCurrentLimitEnable(Double.isFinite(statorCurrentLimitAmps))
+                                .withSupplyCurrentLimit(supplyCurrentLimitAmps)
+                                .withSupplyCurrentLimitEnable(Double.isFinite(supplyCurrentLimitAmps)));
+    }
+
+    @Override
+    public void updateGains(Slot0Configs slot0) {
+        motor.getConfigurator().apply(slot0);
+    }
+
+    @Override
+    public boolean isConnected() {
+        return motor.isConnected();
     }
 }

@@ -537,6 +537,9 @@ export class ProjectService {
     forceGeneratedPaths: ReadonlySet<string> = new Set(),
   ): Promise<ReadonlyMap<string, ProjectFileContent | null>> {
     const generated = new Map<string, ProjectFileContent | null>();
+    const previousModel = this.#session?.model;
+    const previousGenerated =
+      previousModel === undefined ? new Map() : generateStructuredFiles(previousModel);
     generated.set('project.yaml', stringifyProjectYaml(model));
     for (const [filePath, content] of generateStructuredFiles(model)) {
       if (model.unmanagedFiles.includes(filePath)) continue;
@@ -545,18 +548,22 @@ export class ProjectService {
         continue;
       }
       const existing = await readOptional(path.join(root, filePath));
+      const previous = previousGenerated.get(filePath);
       generated.set(
         filePath,
         forceGeneratedPaths.has(filePath)
           ? content
-          : filePath.endsWith('.java')
-            ? mergeGeneratedJava(existing, content)
-            : filePath.endsWith('.md')
-              ? mergeGeneratedDocument(existing, content)
-              : content,
+          : typeof previous === 'string' &&
+              (existing === previous ||
+                (filePath.endsWith('.java') && sameGeneratedJava(existing, previous)))
+            ? content
+            : filePath.endsWith('.java')
+              ? mergeGeneratedJava(existing, content)
+              : filePath.endsWith('.md')
+                ? mergeGeneratedDocument(existing, content)
+                : content,
       );
     }
-    const previousModel = this.#session?.model;
     if (previousModel !== undefined) {
       for (const filePath of generateStructuredFiles(previousModel).keys()) {
         if (
@@ -705,6 +712,17 @@ export class ProjectService {
     }
     return this.#grants.assertGranted(path.join(root, normalized));
   }
+}
+
+function sameGeneratedJava(existing: ProjectFileContent | undefined, generated: string): boolean {
+  const normalize = (value: string): string =>
+    value
+      .replace(/\r\n?/gu, '\n')
+      .split('\n')
+      .map((line) => line.trimEnd())
+      .filter((line) => line.length > 0)
+      .join('\n');
+  return typeof existing === 'string' && normalize(existing) === normalize(generated);
 }
 
 interface PendingChange {

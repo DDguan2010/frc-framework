@@ -240,53 +240,88 @@ function inferSubsystems(
   files: readonly IndexedProjectFile[],
   basePackage: string,
 ): readonly Subsystem[] {
-  const result = new Map<string, Subsystem>();
-  for (const file of files) {
+  const candidates = files.flatMap((file) => {
     const match = /(?:^|\/)subsystems\/(.+)\.java$/u.exec(file.path);
     const primary = file.index.types.find((type) => type.kind === 'class');
-    if (match === null || primary === undefined) continue;
+    if (match === null || primary === undefined) return [];
     const segments = match[1]?.split('/') ?? [];
-    const rootSymbol = javaSymbol(
-      segments.length > 1 ? (segments[0] ?? primary.name) : primary.name,
-    );
-    const rootId = stableId(`subsystem:${rootSymbol}`);
-    if (!result.has(rootId)) {
-      result.set(rootId, {
-        behaviorMode: file.index.states.some((state) => state.role === 'goal')
-          ? 'goal-driven'
-          : 'custom',
-        displayName: rootSymbol,
-        id: rootId,
-        javaPackage: `${basePackage}.subsystems${segments.length > 1 ? `.${segments[0] ?? ''}` : ''}`,
-        kind: 'subsystem',
-        realImplementation: true,
-        simulationImplementation: file.index.patterns.some((pattern) =>
-          pattern.symbol.includes('Sim'),
-        ),
-        symbol: rootSymbol,
-      });
+    const directories = segments.slice(0, -1);
+    const directory = directories.join('/');
+    const ownsDirectory =
+      directories.length > 0 &&
+      javaSymbol(directories.at(-1) ?? '').toLowerCase() === primary.name.toLowerCase();
+    return [{ directories, directory, file, ownsDirectory, primary }];
+  });
+  const directoryOwners = new Map(
+    candidates
+      .filter((candidate) => candidate.ownsDirectory)
+      .map((candidate) => [candidate.directory.toLowerCase(), candidate]),
+  );
+  const actualIds = new Map(
+    candidates.map((candidate) => [
+      candidate.file.path,
+      stableId(`subsystem:${candidate.file.path}:${candidate.primary.name}`),
+    ]),
+  );
+  const syntheticRoots = new Map<string, Subsystem>();
+  const result: Subsystem[] = [];
+  for (const candidate of candidates) {
+    const { directories, file, ownsDirectory, primary } = candidate;
+    const searchLength = ownsDirectory ? directories.length - 1 : directories.length;
+    let parentId: Subsystem['parentId'];
+    for (let length = searchLength; length > 0; length -= 1) {
+      const owner = directoryOwners.get(directories.slice(0, length).join('/').toLowerCase());
+      if (owner !== undefined && owner.file.path !== file.path) {
+        parentId = actualIds.get(owner.file.path);
+        break;
+      }
     }
-    if (primary.name !== rootSymbol) {
-      const id = stableId(`mechanism:${file.path}:${primary.name}`);
-      result.set(id, {
-        behaviorMode: file.index.commandMethods.length > 0 ? 'custom' : 'direct',
-        displayName: primary.name,
-        id,
-        javaFile: file.path,
-        ...(file.index.packageName === undefined ? {} : { javaPackage: file.index.packageName }),
-        kind: primary.name.toLowerCase().includes('superstructure') ? 'group' : 'mechanism',
-        parentId: rootId,
-        symbol: primary.name,
-      });
-    } else {
-      result.set(rootId, {
-        ...result.get(rootId)!,
-        javaFile: file.path,
-        ...(file.index.packageName === undefined ? {} : { javaPackage: file.index.packageName }),
-      });
+    if (parentId === undefined && directories.length > 0) {
+      const rootDirectory = directories[0] ?? '';
+      const rootOwner = directoryOwners.get(rootDirectory.toLowerCase());
+      if (rootOwner === undefined) {
+        const rootSymbol = javaSymbol(rootDirectory || primary.name);
+        const rootId = stableId(`subsystem-folder:${rootDirectory.toLowerCase()}`);
+        if (!syntheticRoots.has(rootDirectory.toLowerCase())) {
+          syntheticRoots.set(rootDirectory.toLowerCase(), {
+            behaviorMode: 'custom',
+            displayName: rootSymbol,
+            id: rootId,
+            javaPackage: `${basePackage}.subsystems.${rootDirectory}`,
+            kind: 'subsystem',
+            realImplementation: true,
+            simulationImplementation: false,
+            symbol: rootSymbol,
+          });
+        }
+        parentId = rootId;
+      }
     }
+    result.push({
+      behaviorMode: file.index.states.some((state) => state.role === 'goal')
+        ? 'goal-driven'
+        : file.index.commandMethods.length > 0
+          ? 'custom'
+          : 'direct',
+      displayName: primary.name,
+      id: actualIds.get(file.path)!,
+      javaFile: file.path,
+      ...(file.index.packageName === undefined ? {} : { javaPackage: file.index.packageName }),
+      kind:
+        parentId === undefined
+          ? 'subsystem'
+          : primary.name.toLowerCase().includes('superstructure')
+            ? 'group'
+            : 'mechanism',
+      ...(parentId === undefined ? {} : { parentId }),
+      realImplementation: true,
+      simulationImplementation: file.index.patterns.some((pattern) =>
+        pattern.symbol.includes('Sim'),
+      ),
+      symbol: primary.name,
+    });
   }
-  return [...result.values()].sort((left, right) =>
+  return [...syntheticRoots.values(), ...result].sort((left, right) =>
     left.displayName.localeCompare(right.displayName),
   );
 }

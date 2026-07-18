@@ -23,7 +23,7 @@ export interface HardwareProblem {
 export function validateHardware(model: FrcProjectModel): readonly HardwareProblem[] {
   return [
     ...validatePorts(model.devices),
-    ...validateSymbols(model.devices),
+    ...validateSymbols(model),
     ...validateParameters(model.devices),
     ...validateFollowers(model.devices),
     ...validateNtPaths(model),
@@ -63,16 +63,17 @@ function portKey(device: Device): string | undefined {
   return `${type.toUpperCase()}:${String(channel)}`;
 }
 
-function validateSymbols(devices: readonly Device[]): HardwareProblem[] {
+function validateSymbols(model: FrcProjectModel): HardwareProblem[] {
   const problems: HardwareProblem[] = [];
   const owners = new Map<string, Device>();
-  for (const device of devices) {
+  for (const device of model.devices) {
     if (!/^[A-Za-z_$][\w$]*$/u.test(device.symbol)) {
       problems.push(
         problem('invalid-symbol', device, 'symbol', `${device.symbol} is not a Java identifier.`),
       );
     }
-    const previous = owners.get(device.symbol);
+    const scopedSymbol = `${device.parentId}:${device.symbol}`;
+    const previous = owners.get(scopedSymbol);
     if (previous !== undefined) {
       problems.push(
         problem(
@@ -82,7 +83,7 @@ function validateSymbols(devices: readonly Device[]): HardwareProblem[] {
           `${device.symbol} is also used by ${previous.displayName}.`,
         ),
       );
-    } else owners.set(device.symbol, device);
+    } else owners.set(scopedSymbol, device);
   }
   return problems;
 }
@@ -222,9 +223,7 @@ function validateNtPaths(model: FrcProjectModel): HardwareProblem[] {
   for (const device of model.devices) {
     for (const parameter of device.parameters) {
       if (parameter.networkTables?.enabled !== true) continue;
-      const path =
-        parameter.networkTables.path ??
-        `${model.networkTables.rootPath}/${device.symbol}/${parameter.key}`;
+      const path = tuningPath(model, device, parameter.key, parameter.networkTables.path);
       const previous = owners.get(path);
       if (!/^\/(?:[^/]+\/?)+$/u.test(path)) {
         problems.push(
@@ -248,6 +247,61 @@ function validateNtPaths(model: FrcProjectModel): HardwareProblem[] {
     }
   }
   return problems;
+}
+
+function tuningPath(
+  model: FrcProjectModel,
+  device: Device,
+  parameterKey: string,
+  explicitPath: string | undefined,
+): string {
+  if (explicitPath !== undefined) return explicitPath;
+  if (device.networkTablesPath !== undefined)
+    return joinNtPath(device.networkTablesPath, parameterKey);
+  const byId = new Map(model.subsystems.map((entry) => [entry.id, entry]));
+  const reverse = [];
+  let current = byId.get(device.parentId);
+  const visited = new Set<string>();
+  while (current !== undefined && !visited.has(current.id)) {
+    reverse.push(current);
+    visited.add(current.id);
+    current = current.parentId === undefined ? undefined : byId.get(current.parentId);
+  }
+  const lineage = reverse.reverse();
+  const override = [...lineage]
+    .reverse()
+    .find((entry) => entry.networkTablesPath !== undefined)?.networkTablesPath;
+  return override === undefined
+    ? joinNtPath(
+        model.networkTables.rootPath,
+        ...lineage.map((entry) => entry.displayName),
+        device.displayName,
+        parameterKey,
+      )
+    : joinNtPath(override, device.displayName, parameterKey);
+}
+
+function joinNtPath(...segments: readonly string[]): string {
+  return normalizeNtPath(
+    segments
+      .map((entry) => entry.replace(/^\/+|\/+$/gu, ''))
+      .filter(Boolean)
+      .join('/'),
+  );
+}
+
+function normalizeNtPath(value: string): string {
+  return `/${value
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      const sanitized = segment
+        .trim()
+        .replace(/[^A-Za-z0-9_.-]+/gu, '_')
+        .replace(/^_+|_+$/gu, '');
+      return sanitized.length === 0 ? 'Unnamed' : sanitized;
+    })
+    .join('/')}`;
 }
 
 function validateSimulation(devices: readonly Device[]): HardwareProblem[] {

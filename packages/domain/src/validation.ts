@@ -5,7 +5,9 @@ import {
   type EntityId,
   type FrcProjectModel,
   type ParameterValue,
+  type Subsystem,
 } from './model.js';
+import { subsystemJavaLocation } from './java-location.js';
 
 export interface ModelProblem {
   readonly code: string;
@@ -149,6 +151,68 @@ export function validateModel(model: FrcProjectModel): readonly ModelProblem[] {
           'dependency-cycle',
           `/subsystems/${String(model.subsystems.indexOf(subsystem))}/dependencies`,
           'Subsystem dependency graph contains a cycle; coordinate through RobotCommands or a Superstructure.',
+          subsystem.id,
+        ),
+      );
+    }
+  }
+  for (const subsystem of model.subsystems) {
+    if (hasCompositionCycle(subsystem.id, model, new Set(), new Set())) {
+      problems.push(
+        error(
+          'composition-cycle',
+          `/subsystems/${String(model.subsystems.indexOf(subsystem))}`,
+          'Parent/child composition and subsystem dependencies form a constructor cycle.',
+          subsystem.id,
+        ),
+      );
+    }
+  }
+  const javaFiles = new Map<string, Subsystem>();
+  for (const [index, subsystem] of model.subsystems.entries()) {
+    try {
+      const location = subsystemJavaLocation(model, subsystem);
+      const existing = javaFiles.get(location.file);
+      if (existing === undefined) javaFiles.set(location.file, subsystem);
+      else if (existing.id !== subsystem.id) {
+        problems.push(
+          error(
+            'java-source-collision',
+            `/subsystems/${String(index)}/symbol`,
+            `Java source path is also used by ${existing.displayName}: ${location.file}.`,
+            subsystem.id,
+          ),
+        );
+      }
+    } catch (locationError) {
+      problems.push(
+        error(
+          'java-location',
+          `/subsystems/${String(index)}`,
+          locationError instanceof Error ? locationError.message : 'Java location is invalid.',
+          subsystem.id,
+        ),
+      );
+    }
+    const generatedMembers = [
+      ...model.subsystems
+        .filter((entry) => entry.parentId === subsystem.id)
+        .map((entry) => `${entry.symbol.slice(0, 1).toLowerCase()}${entry.symbol.slice(1)}`),
+      ...(subsystem.dependencies ?? []).map((entry) => entry.fieldName),
+      ...model.devices
+        .filter((entry) => entry.parentId === subsystem.id)
+        .map((entry) => `${entry.symbol.slice(0, 1).toLowerCase()}${entry.symbol.slice(1)}`),
+      ...(subsystem.stateMachine === undefined ? [] : ['goal']),
+    ];
+    const duplicateField = generatedMembers.find(
+      (field, fieldIndex) => generatedMembers.indexOf(field) !== fieldIndex,
+    );
+    if (duplicateField !== undefined) {
+      problems.push(
+        error(
+          'constructor-field-collision',
+          `/subsystems/${String(index)}`,
+          `Generated child, dependency, device, or Goal member is used more than once: ${duplicateField}.`,
           subsystem.id,
         ),
       );
@@ -399,6 +463,28 @@ function hasDependencyCycle(
   for (const dependency of subsystem?.dependencies ?? []) {
     if (hasDependencyCycle(dependency.targetSubsystemId, subsystems, visiting, complete))
       return true;
+  }
+  visiting.delete(id);
+  complete.add(id);
+  return false;
+}
+
+function hasCompositionCycle(
+  id: EntityId,
+  model: FrcProjectModel,
+  visiting: Set<EntityId>,
+  complete: Set<EntityId>,
+): boolean {
+  if (complete.has(id)) return false;
+  if (visiting.has(id)) return true;
+  visiting.add(id);
+  const subsystem = model.subsystems.find((entry) => entry.id === id);
+  const dependencies = [
+    ...model.subsystems.filter((entry) => entry.parentId === id).map((entry) => entry.id),
+    ...(subsystem?.dependencies ?? []).map((entry) => entry.targetSubsystemId),
+  ];
+  for (const dependencyId of dependencies) {
+    if (hasCompositionCycle(dependencyId, model, visiting, complete)) return true;
   }
   visiting.delete(id);
   complete.add(id);

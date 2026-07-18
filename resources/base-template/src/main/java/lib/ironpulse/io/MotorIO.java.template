@@ -1,5 +1,13 @@
 package lib.ironpulse.io;
 
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.RotationsPerSecond;
+
+import com.ctre.phoenix6.configs.Slot0Configs;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Voltage;
 import lib.ironpulse.subsystem.MotorConfiguration;
 
 public interface MotorIO {
@@ -7,15 +15,72 @@ public interface MotorIO {
 
     default void updateInputs(MotorInputs inputs) {}
 
+    /** 10541-compatible read name; new code may use either naming style. */
+    default void readInputs(MotorInputs inputs) {
+        updateInputs(inputs);
+        inputs.syncCompatibilityAliases();
+    }
+
+    default void readFollowerInputs(MotorInputs[] inputs) {}
+
     default void setDutyCycle(double dutyCycle) {}
+
+    default void setOpenLoopDutyCycle(double dutyCycle) {
+        setDutyCycle(dutyCycle);
+    }
 
     default void setVoltage(double volts) {}
 
     default void setPositionRotations(double rotations) {}
 
+    default void setPositionSetpoint(Angle position) {
+        setPositionRotations(position.in(Rotations));
+    }
+
+    default void setMotionMagicSetpoint(
+            Angle position, double velocity, double acceleration, double jerk) {
+        setPositionSetpoint(position);
+    }
+
     default void setVelocityRotationsPerSecond(double rotationsPerSecond) {}
 
+    default void setVelVoltSetpoint(AngularVelocity velocity) {
+        setVelocityRotationsPerSecond(velocity.in(RotationsPerSecond));
+    }
+
+    default void setVelVoltSetpoint(AngularVelocity velocity, Voltage feedForwardVoltage) {
+        setVelVoltSetpoint(velocity);
+    }
+
+    default void setVelTCSetpoint(AngularVelocity velocity, Current feedForwardTorqueCurrent) {
+        setVelVoltSetpoint(velocity);
+    }
+
     default void zeroPosition() {}
+
+    default void setCurrentPositionAsZero() {
+        zeroPosition();
+    }
+
+    default void setCurrentPosition(Angle position) {
+        setCurrentPositionRotations(position.in(Rotations));
+    }
+
+    default void setCurrentPositionRotations(double rotations) {
+        if (rotations == 0.0) zeroPosition();
+    }
+
+    default void setNeutralMode(boolean wantsBrake) {}
+
+    default void setEnableSoftLimits(boolean forward, boolean reverse) {}
+
+    default void setCurrentLimits(double statorCurrentLimitAmps, double supplyCurrentLimitAmps) {}
+
+    default void updateGains(Slot0Configs slot0) {}
+
+    default boolean isConnected() {
+        return true;
+    }
 
     default void stop() {
         setVoltage(0.0);

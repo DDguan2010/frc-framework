@@ -103,4 +103,14 @@ public final class MotorIOSim implements MotorIO {
     public void zeroPosition() {
         positionRotations = 0.0;
     }
+
+    @Override
+    public void setCurrentPositionRotations(double rotations) {
+        positionRotations = MathUtil.clamp(rotations, minimumRotations, maximumRotations);
+    }
+
+    @Override
+    public boolean isConnected() {
+        return true;
+    }
 }

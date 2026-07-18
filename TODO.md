@@ -666,6 +666,14 @@
 - [x] **CONT-091 P0** 存在未处理 Diff 时阻止下一次结构化修改，并以中英文提示先应用或放弃上一次修改。
 - [x] **CONT-092 P1** 扩充独立实现的 IronPulse 兼容 Base（Beam Break、Rumble、布尔工具），并在 About、README 与第三方说明中鸣谢 IronPulse 6941。
 - [x] **CONT-093 P0** 文件监听器按防抖后的最终磁盘内容识别原子替换，避免 Linux 将软件自身生成写入误报为外部修改。
+- [x] **CONT-094 P0** 任意深度的 Subsystem/Mechanism/Group 都生成独立 Java 文件，并只拥有直接设备、Goal 与局部命令。
+- [x] **CONT-095 P0** 节点“代码”按钮使用统一 Java 位置解析器打开精确文件，设备打开其直接拥有者文件。
+- [x] **CONT-096 P0** 无 `project.yaml` 时按 Java 包与目录递归恢复嵌套树，同时兼容旧式合成根目录。
+- [x] **CONT-097 P0** Swerve/Limelight 全文件预制支持嵌套子节点构造注入、更新迁移和级联删除，不产生重复实体 ID。
+- [x] **CONT-098 P1** IronPulse Catalog v2 按 10541 offseason commit `c0df8d8` 校准远程 CANcoder、zero offset/filter、Motion Magic 和 unit API 兼容层。
+- [x] **CONT-099 P0** 增加三层嵌套、Swerve 内嵌 Goal 节点、删除、Java 回读与真实 WPILib/Phoenix 编译回归测试。
+- [x] **CONT-100 P0** `RobotCommands` 按 requirement 精确注入嵌套节点，不再将 Mechanism 强制提升为顶层 Subsystem。
+- [x] **CONT-101 P0** 设备 Java symbol 按直接拥有者作用域校验，自动 NT 路径加入设备名，支持不同分支同名硬件且不冲突。
 
 ## 14. 首批开发迭代建议
 

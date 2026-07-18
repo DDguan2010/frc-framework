@@ -158,6 +158,8 @@ Read these files before changing robot code:
 
 Keep \`RobotContainer\` as a small composition root. Put controller triggers in \`controls/OperatorInterface\`, cross-subsystem command factories in \`commands/RobotCommands\`, local mechanism commands with their subsystem, autonomous composition under \`auto\`, and dashboard/field output under \`telemetry\`.
 
+Every subsystem-tree node is an ordinary Java owner at every depth. A node owns its direct devices, Goals, and local commands; its parent receives the child through constructor injection and exposes a typed accessor. Use the exact source paths in \`docs/SUBSYSTEMS.md\` instead of assuming all nested logic belongs to the root subsystem file.
+
 Do not edit generated files or blocks marked \`<frc-framework:managed>\` without also updating \`project.yaml\`. Custom Java outside managed blocks is intentionally preserved. Run \`./gradlew spotlessApply compileJava test\` after code changes.
 `;
 }
@@ -179,6 +181,8 @@ Java package: \`${model.project.javaPackage}\`
 - \`src/ext/lib/ntext\`: compile-time NetworkTables parameter generation.
 
 The Java project builds without FRC Framework. \`project.yaml\` adds structured editing but is not a runtime dependency.
+
+The subsystem tree maps directly to Java packages. For example, \`Intake -> IntakePivot -> ZeroSensorLogic\` becomes \`subsystems/intake/Intake.java\`, \`subsystems/intake/intakePivot/IntakePivot.java\`, and \`subsystems/intake/intakePivot/zeroSensorLogic/ZeroSensorLogic.java\`. Each node owns only its direct hardware and Goal model; \`RobotContainer\` constructs children before parents.
 `;
 }
 

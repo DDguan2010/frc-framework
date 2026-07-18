@@ -24,6 +24,10 @@ Changelog, and versions follow Semantic Versioning while the application remains
 - Native Windows, macOS, and Linux GitHub Release workflow driven by one version input.
 - Bilingual preset summaries, quick-start guidance, recommended defaults, and parameter descriptions.
 - Incremental live Java indexing so externally added or removed Commands and Autos update in the UI.
+- A Java source file, direct hardware ownership, local Goals, and typed parent composition for every
+  subsystem-tree node at arbitrary depth.
+- IronPulse Catalog v2 compatibility for the current 10541 remote CANcoder, zeroing, Motion Magic,
+  unit-based motor IO, and runtime configuration surface.
 
 ### Fixed
 
@@ -37,3 +41,7 @@ Changelog, and versions follow Semantic Versioning while the application remains
 - NetworkTables controls are now explicit, spacious, enabled by default, and refresh immediately after
   an applied change.
 - Application and title-bar icons now preserve the source SVG transparency.
+- Nested Mechanism code navigation now opens the selected node instead of its root subsystem, and
+  nested nodes can be added to or removed from full-file Swerve/Limelight presets safely.
+- `RobotCommands` receives the exact nested requirement, repeated device symbols are scoped to their
+  owning Java class, and generated NT paths include the device name.

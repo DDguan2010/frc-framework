@@ -39,7 +39,9 @@ pnpm dev
 
 在“项目”页可添加 Subsystem、Mechanism、Device 和 Goal。选择节点后，在右侧 Inspector 修改名称、Java symbol、CAN ID、总线、参数、仿真和 NT 发布选项。
 
-这里的 **Mechanism（机构）** 不是另一个必须参与 WPILib 调度的 Subsystem，而是 Subsystem 内部的物理功能单元。例如 `Shooter` 是一个 Subsystem，其中可包含 `Upper` 和 `Lower` 两个 Mechanism；每个 Mechanism 再包含自己的电机、传感器、参数和目标值。它让结构和真实机器人一致，又不会强迫每组电机都拆成 Java Subsystem。
+这里的 **Mechanism（机构）** 是 Subsystem 内部的物理功能单元。例如 `Shooter` 可包含 `Upper` 和 `Lower`，`Intake` 可包含 `IntakePivot`。每个树节点在任意深度都有自己的 Java 文件，只拥有直接设备、Goal 和局部命令；父节点通过构造器接收直接子节点。Mechanism 不必单独参与 WPILib 调度，但它不再只是一个没有代码位置的分组。
+
+选中任意 Subsystem、Mechanism 或更深节点后点击“代码”，会打开该节点自己的 Java 文件。例如 `Intake → IntakePivot` 默认对应 `subsystems/intake/Intake.java` 与 `subsystems/intake/intakePivot/IntakePivot.java`，不会再统一跳到 `Intake.java`。
 
 “打开代码”会按设置的编辑器准确跳转到 Java 文件与行列。代码协作支持：
 
