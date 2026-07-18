@@ -26,6 +26,13 @@ export function generateStructuredFiles(
   )) {
     const location = subsystemJavaLocation(model, subsystem);
     files.set(location.file, subsystemJava(model, subsystem, location.packageName));
+    const motors = ownedMotors(model, subsystem);
+    if (motors.length > 0) {
+      files.set(
+        location.file.replace(/\.java$/u, 'Config.java'),
+        subsystemConfigJava(model, subsystem, location.packageName, motors),
+      );
+    }
   }
   files.set(
     `src/main/java/${model.project.javaPackage.replace(/\./gu, '/')}/RobotContainer.java`,
@@ -109,25 +116,41 @@ function children(model: FrcProjectModel, parentId: string): readonly Subsystem[
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
 }
 
-function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: string): string {
-  const directChildren = children(model, node.id);
-  const ownedDevices = model.devices.filter(
+function ownedDevices(model: FrcProjectModel, node: Subsystem): readonly Device[] {
+  return model.devices.filter(
     (device) => device.parentId === node.id && !presetOwnsDevice(model, node, device),
   );
-  const motors = ownedDevices
+}
+
+function ownedMotors(model: FrcProjectModel, node: Subsystem): readonly Device[] {
+  return ownedDevices(model, node)
     .filter((device) => device.kind === 'motor')
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
-  const mechanismConfigurations = ownedDevices
+}
+
+function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: string): string {
+  const directChildren = children(model, node.id);
+  const directDevices = ownedDevices(model, node);
+  const motors = ownedMotors(model, node);
+  const mechanismConfigurations = directDevices
     .filter(
       (device) =>
         device.catalogId !== undefined &&
         findComponentDefinition(device.catalogId)?.role === 'mechanism',
     )
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
-  const beamBreaks = ownedDevices
+  const controlledMechanism = mechanismConfigurations.find((device) =>
+    ['ironpulse.velocity-mechanism', 'ironpulse.position-mechanism'].includes(
+      device.catalogId ?? '',
+    ),
+  );
+  const controlledMotor =
+    motors.find((device) => device.role === 'primary') ??
+    motors.find((device) => device.role !== 'follower');
+  const beamBreaks = directDevices
     .filter((device) => device.catalogId === 'ironpulse.beam-break')
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
-  const indicators = ownedDevices
+  const indicators = directDevices
     .filter((device) => device.catalogId === 'ironpulse.indicator')
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
   const stateMachine = node.stateMachine;
@@ -148,11 +171,10 @@ function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: str
       !presetOwnsDevice(model, owner, device)
     );
   });
-  const hasTuning = motors.some((device) =>
+  const hasTuning = directDevices.some((device) =>
     device.parameters.some((parameter) => parameter.networkTables?.enabled === true),
   );
   const imports = [
-    ...(motors.length === 0 ? [] : ['com.ctre.phoenix6.signals.InvertedValue']),
     ...(motors.length === 0 ? [] : ['edu.wpi.first.wpilibj.RobotBase']),
     ...(beamBreaks.length === 0
       ? []
@@ -161,6 +183,7 @@ function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: str
       ? []
       : ['edu.wpi.first.wpilibj.AddressableLED', 'edu.wpi.first.wpilibj.AddressableLEDBuffer']),
     ...(needsCommands ? ['edu.wpi.first.wpilibj2.command.Command'] : []),
+    'edu.wpi.first.wpilibj2.command.SubsystemBase',
     ...(needsCommands && node.advantageKitLogging === true
       ? ['org.littletonrobotics.junction.AutoLogOutput']
       : []),
@@ -195,8 +218,8 @@ function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: str
       .sort()
       .map((entry) => `import ${entry};`),
     '',
-    `/** ${escapeJavadoc(node.notes ?? `${node.displayName} ${node.kind}.`)} */`,
-    `public final class ${node.symbol} {`,
+    `/** ${escapeJavadoc(node.notes ?? `${node.displayName} ${node.kind}.`)}${motors.length === 0 ? '' : ` Runtime goals and commands live here; hardware values live in ${node.symbol}Config.`} */`,
+    `public final class ${node.symbol} extends SubsystemBase {`,
     '    // <frc-framework:managed>',
   ];
   for (const child of directChildren) {
@@ -205,7 +228,7 @@ function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: str
   for (const dependency of dependencies) {
     lines.push(`    private final ${dependency.target.symbol} ${dependency.fieldName};`);
   }
-  for (const motor of motors) lines.push(...motorDeclaration(model, motor));
+  for (const motor of motors) lines.push(...motorFieldDeclaration(node, motor));
   for (const mechanism of mechanismConfigurations)
     lines.push(...mechanismSetpointDeclaration(mechanism));
   for (const sensor of beamBreaks) lines.push(...beamBreakDeclaration(sensor));
@@ -214,7 +237,13 @@ function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: str
     ...directChildren.map((child) => `${child.symbol} ${lowerFirst(child.symbol)}`),
     ...dependencies.map((dependency) => `${dependency.target.symbol} ${dependency.fieldName}`),
   ];
-  if (constructorParameters.length > 0) {
+  const defaultControl =
+    controlledMechanism === undefined && beamBreaks.length > 0 && controlledMotor !== undefined
+      ? [
+          `${lowerFirst(controlledMotor.symbol)}.setDefaultCommand(${lowerFirst(controlledMotor.symbol)}.runDutyCycle(this::goalDutyCycle));`,
+        ]
+      : mechanismDefaultControl(controlledMechanism, controlledMotor);
+  if (constructorParameters.length > 0 || defaultControl.length > 0) {
     lines.push(
       '',
       `    public ${node.symbol}(${constructorParameters.join(', ')}) {`,
@@ -224,6 +253,7 @@ function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: str
       ...dependencies.map(
         (dependency) => `        this.${dependency.fieldName} = ${dependency.fieldName};`,
       ),
+      ...defaultControl.map((line) => `        ${line}`),
       '    }',
     );
   }
@@ -245,6 +275,19 @@ function subsystemJava(model: FrcProjectModel, node: Subsystem, packageName: str
         node.advantageKitLogging === true ? node.symbol : undefined,
       ),
     );
+  if (controlledMechanism !== undefined && controlledMotor !== undefined) {
+    lines.push(
+      '',
+      ...mechanismGoalControl(
+        model,
+        controlledMechanism,
+        controlledMotor,
+        stateMachine?.states ?? [],
+      ),
+    );
+  } else if (beamBreaks.length > 0 && controlledMotor !== undefined && needsCommands) {
+    lines.push('', ...indexerGoalControl(beamBreaks[0], stateMachine?.states ?? []));
+  }
   lines.push('    // </frc-framework:managed>', '');
   for (const child of directChildren) {
     lines.push(
@@ -412,9 +455,106 @@ function mechanismSetpointDeclaration(device: Device): readonly string[] {
   ];
 }
 
-function motorDeclaration(model: FrcProjectModel, device: Device): readonly string[] {
-  const constant = `${camelToUpperSnake(device.symbol)}_CONFIG`;
-  const field = lowerFirst(device.symbol);
+interface NamedSetpoint {
+  readonly name: string;
+  readonly value: number;
+}
+
+function namedSetpoints(device: Device): readonly NamedSetpoint[] {
+  const values = parameter(device, 'setpoints')?.value;
+  if (!Array.isArray(values)) return [];
+  return values.flatMap((entry) => {
+    if (typeof entry !== 'string') return [];
+    const match = /^\s*([A-Za-z_$][A-Za-z\d_$]*)\s*=\s*(-?(?:\d+(?:\.\d*)?|\.\d+))\s*$/u.exec(
+      entry,
+    );
+    return match?.[1] === undefined || match[2] === undefined
+      ? []
+      : [{ name: camelToUpperSnake(match[1]), value: Number(match[2]) }];
+  });
+}
+
+function mechanismDefaultControl(
+  mechanism: Device | undefined,
+  motor: Device | undefined,
+): readonly string[] {
+  if (mechanism === undefined || motor === undefined) return [];
+  const field = lowerFirst(motor.symbol);
+  return mechanism.catalogId === 'ironpulse.velocity-mechanism'
+    ? [`${field}.setDefaultCommand(${field}.velocityCommand(this::goalSetpointRps));`]
+    : mechanism.catalogId === 'ironpulse.position-mechanism'
+      ? [`${field}.setDefaultCommand(${field}.positionCommand(this::goalSetpointRotations));`]
+      : [];
+}
+
+function mechanismGoalControl(
+  model: FrcProjectModel,
+  mechanism: Device,
+  motor: Device,
+  states: readonly StateDefinition[],
+): readonly string[] {
+  const velocity = mechanism.catalogId === 'ironpulse.velocity-mechanism';
+  const method = velocity ? 'goalSetpointRps' : 'goalSetpointRotations';
+  const unit = stringParameter(mechanism, 'setpointUnit') ?? (velocity ? 'rps' : 'rot');
+  const configured = new Map(namedSetpoints(mechanism).map((entry) => [entry.name, entry.value]));
+  const cases = states.map((state) => {
+    const goalName = camelToUpperSnake(state.symbol);
+    const value = configured.get(goalName) ?? 0;
+    return `            case ${goalName} -> ${javaNumber(convertSetpoint(value, unit, velocity))};`;
+  });
+  const tolerance = numberParameter(mechanism, 'tolerance', velocity ? 1 : 0.01);
+  const convertedTolerance = convertSetpoint(tolerance, unit, velocity);
+  const motorField = lowerFirst(motor.symbol);
+  const zeroCommand = velocity
+    ? []
+    : [
+        '',
+        '    /** Homes this mechanism against its verified hard stop and records zero. */',
+        '    public Command zeroCommand() {',
+        `        return ${motorField}.zeroAgainstHardStopCommand(${numberExpression(model, motor, 'zeroingVoltage', -1)}, ${numberExpression(model, motor, 'zeroingCurrent', 30)}, ${integerExpression(model, motor, 'zeroingFilterSize', 5)});`,
+        '    }',
+      ];
+  return [
+    `    private double ${method}() {`,
+    '        return switch (goal) {',
+    ...cases,
+    '        };',
+    '    }',
+    '',
+    '    /** True when the primary motor is within the configured setpoint tolerance. */',
+    '    public boolean atGoal() {',
+    `        return ${motorField}.${velocity ? 'atVelocity' : 'atPosition'}(${method}(), ${javaNumber(convertedTolerance)});`,
+    '    }',
+    ...zeroCommand,
+  ];
+}
+
+function indexerGoalControl(
+  beamBreak: Device | undefined,
+  states: readonly StateDefinition[],
+): readonly string[] {
+  const active = states.find((state) => !/^idle$/iu.test(state.symbol)) ?? states[0];
+  if (active === undefined) return [];
+  const sensorReady = beamBreak === undefined ? '' : ` && !${lowerFirst(beamBreak.symbol)}Broken()`;
+  return [
+    '    /** Runs while active and the beam is clear; IDLE or a detected piece commands zero. */',
+    '    private double goalDutyCycle() {',
+    `        return goal == Goal.${camelToUpperSnake(active.symbol)}${sensorReady} ? 1.0 : 0.0;`,
+    '    }',
+  ];
+}
+
+function convertSetpoint(value: number, unit: string, velocity: boolean): number {
+  if (velocity) {
+    if (unit === 'rpm') return value / 60;
+    return value;
+  }
+  if (unit === 'deg') return value / 360;
+  if (unit === 'rad') return value / (2 * Math.PI);
+  return value;
+}
+
+function motorConfigurationDeclaration(model: FrcProjectModel, device: Device): readonly string[] {
   const inversion = enumExpression(
     model,
     device,
@@ -467,20 +607,12 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
   const leaderId = stringParameter(device, 'leaderId');
   const leader = model.devices.find((entry) => entry.id === leaderId);
   const opposeLeader = booleanParameter(device, 'opposeLeader');
-  const hasTuning = device.parameters.some(
-    (parameter) => parameter.networkTables?.enabled === true,
-  );
   const configName = `${lowerFirst(device.symbol)}Configuration`;
-  const declarationStart = hasTuning
-    ? [
-        `    private static MotorConfiguration ${configName}() {`,
-        `        return MotorConfiguration.talonFx("${escapeJava(device.displayName)}", ${String(device.canId ?? 0)})`,
-      ]
-    : [
-        `    private static final MotorConfiguration ${constant} =`,
-        `            MotorConfiguration.talonFx("${escapeJava(device.displayName)}", ${String(device.canId ?? 0)})`,
-      ];
-  const indentation = hasTuning ? '                ' : '                    ';
+  const declarationStart = [
+    `    public static MotorConfiguration ${configName}() {`,
+    `        return MotorConfiguration.talonFx("${escapeJava(device.displayName)}", ${String(device.canId ?? 0)})`,
+  ];
+  const indentation = '                ';
   return [
     ...declarationStart,
     ...(device.canBus === undefined || device.canBus === 'rio'
@@ -520,7 +652,7 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
     ...(parameter(device, 'remoteEncoderEnabled') === undefined
       ? []
       : [
-          `${indentation}.remoteEncoder(new MotorConfiguration.RemoteEncoder(${booleanExpression(model, device, 'remoteEncoderEnabled', remoteEnabled)}, (int) ${numberExpression(model, device, 'remoteEncoderId', remoteId)}, ${stringExpression(model, device, 'remoteEncoderCanBus', remoteCanBus)}, ${numberExpression(model, device, 'remoteEncoderMagnetOffset', remoteMagnetOffset)}, ${stringExpression(model, device, 'remoteEncoderSensorDirection', remoteSensorDirection)}, ${numberExpression(model, device, 'rotorToSensorRatio', rotorRatio)}, ${stringExpression(model, device, 'feedbackSource', feedbackSource)}))`,
+          `${indentation}.remoteEncoder(new MotorConfiguration.RemoteEncoder(${booleanExpression(model, device, 'remoteEncoderEnabled', remoteEnabled)}, ${integerExpression(model, device, 'remoteEncoderId', remoteId)}, ${stringExpression(model, device, 'remoteEncoderCanBus', remoteCanBus)}, ${numberExpression(model, device, 'remoteEncoderMagnetOffset', remoteMagnetOffset)}, ${stringExpression(model, device, 'remoteEncoderSensorDirection', remoteSensorDirection)}, ${numberExpression(model, device, 'rotorToSensorRatio', rotorRatio)}, ${stringExpression(model, device, 'feedbackSource', feedbackSource)}))`,
         ]),
     ...(parameter(device, 'continuousWrap') === undefined
       ? []
@@ -549,7 +681,7 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
     parameter(device, 'zeroingFilterSize') === undefined
       ? []
       : [
-          `${indentation}.zeroing(new MotorConfiguration.Zeroing(${numberExpression(model, device, 'zeroingVoltage', zeroingVoltage)}, ${numberExpression(model, device, 'zeroingCurrent', zeroingCurrent)}, (int) ${numberExpression(model, device, 'zeroingFilterSize', zeroingFilterSize)}))`,
+          `${indentation}.zeroing(new MotorConfiguration.Zeroing(${numberExpression(model, device, 'zeroingVoltage', zeroingVoltage)}, ${numberExpression(model, device, 'zeroingCurrent', zeroingCurrent)}, ${integerExpression(model, device, 'zeroingFilterSize', zeroingFilterSize)}))`,
         ]),
     ...(parameter(device, 'tolerance') === undefined
       ? []
@@ -569,17 +701,75 @@ function motorDeclaration(model: FrcProjectModel, device: Device): readonly stri
           `${indentation}.simulation(new MotorConfiguration.Simulation(${numberExpression(model, device, 'simGearRatio', gearing)}, ${numberExpression(model, device, 'simInertia', inertia)}, ${numberExpression(model, device, 'simFrictionVoltage', friction)}, ${numberExpression(model, device, 'simMinimum', simMinimum)}, ${numberExpression(model, device, 'simMaximum', simMaximum)}))`,
         ]),
     `${indentation}.build();`,
-    ...(hasTuning ? ['    }'] : []),
+    '    }',
+  ];
+}
+
+function motorFieldDeclaration(node: Subsystem, device: Device): readonly string[] {
+  const field = lowerFirst(device.symbol);
+  const config = `${node.symbol}Config.${field}Configuration()`;
+  const hasTuning = device.parameters.some(
+    (parameter) => parameter.networkTables?.enabled === true,
+  );
+  return [
     `    private final MotorSubsystem ${field} =`,
     ...(hasTuning
       ? [
-          `            new MotorSubsystem("${escapeJava(device.displayName)}", createMotorIO(${configName}()),`,
-          `                    () -> ${configName}(), TuningParameters::isAnyChanged);`,
+          `            new MotorSubsystem("${escapeJava(device.displayName)}", createMotorIO(${config}),`,
+          `                    ${node.symbol}Config::${field}Configuration, ${node.symbol}Config::tuningChanged);`,
         ]
       : [
-          `            new MotorSubsystem("${escapeJava(device.displayName)}", createMotorIO(${constant}));`,
+          `            new MotorSubsystem("${escapeJava(device.displayName)}", createMotorIO(${config}));`,
         ]),
   ];
+}
+
+function subsystemConfigJava(
+  model: FrcProjectModel,
+  node: Subsystem,
+  packageName: string,
+  motors: readonly Device[],
+): string {
+  const hasTuning = motors.some((device) =>
+    device.parameters.some((parameter) => parameter.networkTables?.enabled === true),
+  );
+  const tuningFields = motors.flatMap((device) =>
+    device.parameters
+      .filter((parameter) => parameter.networkTables?.enabled === true)
+      .map((parameter) => `TuningParameters.${tuningFieldName(model, parameter.id)}.hasChanged()`),
+  );
+  const imports = [
+    'com.ctre.phoenix6.signals.InvertedValue',
+    ...(hasTuning ? [`${model.project.javaPackage}.tuning.TuningParameters`] : []),
+    'lib.ironpulse.subsystem.MotorConfiguration',
+  ];
+  return [
+    `package ${packageName};`,
+    '',
+    ...imports.sort().map((entry) => `import ${entry};`),
+    '',
+    `/** Hardware constants and motor configuration for {@link ${node.symbol}}. */`,
+    `public final class ${node.symbol}Config {`,
+    '    // <frc-framework:managed>',
+    ...motors.flatMap((motor, index) => [
+      ...(index === 0 ? [] : ['']),
+      ...motorConfigurationDeclaration(model, motor),
+    ]),
+    ...(hasTuning
+      ? [
+          '',
+          '    /** True when a NetworkTables tuning value must be reapplied to hardware. */',
+          '    public static boolean tuningChanged() {',
+          `        return ${tuningFields.join('\n                || ')};`,
+          '    }',
+        ]
+      : []),
+    '',
+    `    private ${node.symbol}Config() {}`,
+    '    // </frc-framework:managed>',
+    '}',
+    '',
+  ].join('\n');
 }
 
 function tuningParametersJava(model: FrcProjectModel): string {
@@ -625,6 +815,15 @@ function numberExpression(
     return `TuningParameters.${tuningFieldName(model, parameter.id)}.getValue()`;
   }
   return javaNumber(fallback);
+}
+
+function integerExpression(
+  model: FrcProjectModel,
+  device: Device,
+  key: string,
+  fallback: number,
+): string {
+  return `(int) Math.round(${numberExpression(model, device, key, fallback)})`;
 }
 
 function booleanExpression(
@@ -745,7 +944,7 @@ function stateMachineDeclaration(
     ...(generateCommand
       ? [
           '    public Command setGoalCommand(Goal value) {',
-          '        return edu.wpi.first.wpilibj2.command.Commands.runOnce(() -> setGoal(value));',
+          '        return edu.wpi.first.wpilibj2.command.Commands.runOnce(() -> setGoal(value), this);',
           '    }',
         ]
       : []),
@@ -754,6 +953,8 @@ function stateMachineDeclaration(
 
 function robotContainerJava(model: FrcProjectModel): string {
   const nodes = compositionOrder(model);
+  const swerve = swerveSubsystem(model);
+  const driverAxes = driverAxisConfiguration(model);
   const symbolCounts = new Map<string, number>();
   for (const node of nodes) symbolCounts.set(node.symbol, (symbolCounts.get(node.symbol) ?? 0) + 1);
   const imports = nodes
@@ -775,6 +976,10 @@ function robotContainerJava(model: FrcProjectModel): string {
             },
           ];
     });
+  const defaultDrive =
+    swerve === undefined || driverAxes === undefined
+      ? ''
+      : `        ${compositionFieldName(model, swerve)}.setDefaultCommand(${compositionFieldName(model, swerve)}.teleopDriveCommand(operatorInterface::driverForward, operatorInterface::driverLeft, operatorInterface::driverRotation));\n`;
   return `package ${model.project.javaPackage};
 
 import edu.wpi.first.wpilibj2.command.Command;
@@ -826,7 +1031,7 @@ ${nodes
 
     public void initialize() {
         commands.configureDefaults();
-        operatorInterface.configureBindings(commands);
+${defaultDrive}        operatorInterface.configureBindings(commands);
         autoManager.configure(commands);
         telemetry.publish();
     }
@@ -1010,9 +1215,10 @@ function operatorInterfaceJava(model: FrcProjectModel): string {
     .filter((provider) => /^[A-Za-z_$][\w$]*$/u.test(provider))
     .map((provider) => `import edu.wpi.first.wpilibj2.command.button.${provider};`)
     .sort();
+  const driverAxes = driverAxisConfiguration(model);
   return `package ${model.project.javaPackage}.controls;
 
-import ${model.project.javaPackage}.commands.RobotCommands;
+${driverAxes === undefined ? '' : 'import edu.wpi.first.math.MathUtil;\n'}import ${model.project.javaPackage}.commands.RobotCommands;
 ${providerImports.join('\n')}${providerImports.length === 0 ? '' : '\n'}
 /** Controller declarations and trigger bindings. Complex input math remains ordinary Java. */
 public final class OperatorInterface {
@@ -1030,8 +1236,96 @@ ${controllers
 ${bindings.map((binding) => bindingJava(model, binding)).join('\n')}${bindings.length === 0 ? '        // No bindings configured.' : ''}
         // </frc-framework:managed>
     }
+${
+  driverAxes === undefined
+    ? ''
+    : `
+    /** Shaped field-forward input used by the generated Swerve default command. */
+    public double driverForward() {
+        return MathUtil.applyDeadband(${driverAxes.forward}, ${javaNumber(driverAxes.deadband)}) * ${javaNumber(driverAxes.scale)};
+    }
+
+    /** Shaped field-left input used by the generated Swerve default command. */
+    public double driverLeft() {
+        return MathUtil.applyDeadband(${driverAxes.left}, ${javaNumber(driverAxes.deadband)}) * ${javaNumber(driverAxes.scale)};
+    }
+
+    /** Shaped counter-clockwise rotation input used by the generated Swerve default command. */
+    public double driverRotation() {
+        return MathUtil.applyDeadband(${driverAxes.rotation}, ${javaNumber(driverAxes.deadband)}) * ${javaNumber(driverAxes.scale)};
+    }
+`
+}
 }
 `;
+}
+
+function swerveSubsystem(model: FrcProjectModel): Subsystem | undefined {
+  if (!model.presets.some((preset) => preset.presetId === 'frc.swerve')) return undefined;
+  return model.subsystems.find(
+    (entry) =>
+      entry.javaFile?.replace(/\\/gu, '/').endsWith('/subsystems/swerve/SwerveSubsystem.java') ===
+      true,
+  );
+}
+
+interface DriverAxisConfiguration {
+  readonly deadband: number;
+  readonly forward: string;
+  readonly left: string;
+  readonly rotation: string;
+  readonly scale: number;
+}
+
+function driverAxisConfiguration(model: FrcProjectModel): DriverAxisConfiguration | undefined {
+  if (swerveSubsystem(model) === undefined) return undefined;
+  const controller = model.controllers.find((entry) => entry.role === 'driver');
+  if (controller === undefined) return undefined;
+  const field = controller.symbol;
+  let axes:
+    | {
+        readonly forward: readonly [string, number];
+        readonly left: readonly [string, number];
+        readonly rotation: readonly [string, number];
+      }
+    | undefined;
+  if (controller.provider === 'CommandXboxController') {
+    axes = {
+      forward: [`${field}.getLeftY()`, 1],
+      left: [`${field}.getLeftX()`, 0],
+      rotation: [`${field}.getRightX()`, 4],
+    };
+  } else if (['CommandPS4Controller', 'CommandPS5Controller'].includes(controller.provider)) {
+    axes = {
+      forward: [`${field}.getLeftY()`, 1],
+      left: [`${field}.getLeftX()`, 0],
+      rotation: [`${field}.getRightX()`, 2],
+    };
+  } else if (controller.provider === 'CommandJoystick') {
+    axes = {
+      forward: [`${field}.getY()`, 1],
+      left: [`${field}.getX()`, 0],
+      rotation: [`${field}.getTwist()`, 2],
+    };
+  } else if (controller.provider === 'CommandGenericHID') {
+    axes = {
+      forward: [`${field}.getHID().getRawAxis(1)`, 1],
+      left: [`${field}.getHID().getRawAxis(0)`, 0],
+      rotation: [`${field}.getHID().getRawAxis(4)`, 4],
+    };
+  }
+  if (axes === undefined) return undefined;
+  const expression = ([value, index]: readonly [string, number]): string => {
+    const invertedByUser = controller.invertAxes?.includes(index) === true;
+    return `${invertedByUser ? '' : '-'}${value}`;
+  };
+  return {
+    deadband: controller.deadband ?? 0.08,
+    forward: expression(axes.forward),
+    left: expression(axes.left),
+    rotation: expression(axes.rotation),
+    scale: controller.axisScale ?? 1,
+  };
 }
 
 function bindingJava(model: FrcProjectModel, binding: FrcProjectModel['bindings'][number]): string {
@@ -1342,6 +1636,16 @@ function subsystemsDocument(model: FrcProjectModel): string {
     .sort((left, right) => parentPath(model, left.id).localeCompare(parentPath(model, right.id)))
     .map((node) => {
       const depth = subsystemDepth(model, node);
+      const location = subsystemJavaLocation(model, node);
+      const presetConfig =
+        node.symbol === 'SwerveSubsystem' &&
+        model.presets.some((preset) => preset.presetId === 'frc.swerve')
+          ? location.file.replace(/SwerveSubsystem\.java$/u, 'SwerveConfig.java')
+          : undefined;
+      const config =
+        ownedMotors(model, node).length === 0 && presetConfig === undefined
+          ? ''
+          : `; hardware config: \`${presetConfig ?? location.file.replace(/\.java$/u, 'Config.java')}\``;
       const dependencies = (node.dependencies ?? [])
         .map(
           (dependency) =>
@@ -1349,7 +1653,7 @@ function subsystemsDocument(model: FrcProjectModel): string {
               ?.displayName ?? dependency.targetSubsystemId,
         )
         .join(', ');
-      return `${'  '.repeat(depth)}- ${node.kind}: **${node.displayName}** (\`${node.symbol}\`) — ${node.behaviorMode ?? 'direct'}; source: \`${subsystemJavaLocation(model, node).file}\`${dependencies.length === 0 ? '' : `; depends on ${dependencies}`}`;
+      return `${'  '.repeat(depth)}- ${node.kind}: **${node.displayName}** (\`${node.symbol}\`) — ${node.behaviorMode ?? 'direct'}; runtime: \`${location.file}\`${config}${dependencies.length === 0 ? '' : `; depends on ${dependencies}`}`;
     });
   return `# Subsystems
 

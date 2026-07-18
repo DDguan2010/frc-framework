@@ -7,7 +7,12 @@ export default defineConfig({
       reporter: ['text', 'html'],
     },
     environment: 'node',
-    include: ['packages/**/*.test.ts', 'apps/**/*.test.ts', 'tests/performance/**/*.test.ts'],
+    include: [
+      'packages/**/*.test.ts',
+      'apps/**/*.test.ts',
+      'tests/performance/**/*.test.ts',
+      'tests/acceptance/**/*.test.ts',
+    ],
     passWithNoTests: false,
     testTimeout: 15_000,
   },

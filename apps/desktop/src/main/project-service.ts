@@ -7,11 +7,13 @@ import {
   generateStructuredFiles,
   mergeGeneratedDocument,
   mergeGeneratedJava,
+  sameJavaTokens,
 } from '@frc-framework/code-generator';
 import {
   createEmptyProject,
   DomainSession,
   executeCommand,
+  subsystemJavaLocation,
   validateModel,
   type DomainCommand,
   type FrcProjectModel,
@@ -345,6 +347,7 @@ export class ProjectService {
         root,
         model,
         request.action === 'regenerate' ? new Set(paths) : undefined,
+        request.action === 'compare' ? new Set(paths) : undefined,
       );
     } catch (error) {
       if (request.action !== 'compare') throw error;
@@ -535,13 +538,15 @@ export class ProjectService {
     root: string,
     model: FrcProjectModel,
     forceGeneratedPaths: ReadonlySet<string> = new Set(),
+    includeUnchangedPaths: ReadonlySet<string> = new Set(),
   ): Promise<ReadonlyMap<string, ProjectFileContent | null>> {
     const generated = new Map<string, ProjectFileContent | null>();
     const previousModel = this.#session?.model;
     const previousGenerated =
       previousModel === undefined ? new Map() : generateStructuredFiles(previousModel);
+    const nextGenerated = generateStructuredFiles(model);
     generated.set('project.yaml', stringifyProjectYaml(model));
-    for (const [filePath, content] of generateStructuredFiles(model)) {
+    for (const [filePath, content] of nextGenerated) {
       if (model.unmanagedFiles.includes(filePath)) continue;
       if (typeof content !== 'string') {
         generated.set(filePath, content);
@@ -549,25 +554,46 @@ export class ProjectService {
       }
       const existing = await readOptional(path.join(root, filePath));
       const previous = previousGenerated.get(filePath);
-      generated.set(
-        filePath,
-        forceGeneratedPaths.has(filePath)
-          ? content
-          : typeof previous === 'string' &&
-              (existing === previous ||
-                (filePath.endsWith('.java') && sameGeneratedJava(existing, previous)))
+      const forced = forceGeneratedPaths.has(filePath);
+      // Do not touch a generated path when this command did not change its
+      // expected output. This isolates structured edits from stale
+      // files produced by an older FRC Framework version and from unrelated
+      // team-owned edits. Missing legacy files are repaired only through the
+      // explicit Regenerate action instead of being mixed into another edit.
+      if (!forced && !includeUnchangedPaths.has(filePath) && previous === content) continue;
+      try {
+        generated.set(
+          filePath,
+          forced
             ? content
-            : filePath.endsWith('.java')
-              ? mergeGeneratedJava(existing, content)
-              : filePath.endsWith('.md')
-                ? mergeGeneratedDocument(existing, content)
-                : content,
-      );
+            : typeof previous === 'string' &&
+                (existing === previous ||
+                  (filePath.endsWith('.java') && sameGeneratedJava(existing, previous)))
+              ? content
+              : filePath.endsWith('.java')
+                ? mergeGeneratedJava(existing, content)
+                : filePath.endsWith('.md')
+                  ? mergeGeneratedDocument(existing, content)
+                  : content,
+        );
+      } catch (error) {
+        if (
+          typeof existing === 'string' &&
+          previousModel !== undefined &&
+          isLegacyNestedRemovalNoop(filePath, existing, previousModel, model)
+        ) {
+          generated.set(filePath, existing);
+          continue;
+        }
+        throw new Error(`${filePath}: ${error instanceof Error ? error.message : String(error)}`, {
+          cause: error,
+        });
+      }
     }
     if (previousModel !== undefined) {
-      for (const filePath of generateStructuredFiles(previousModel).keys()) {
+      for (const filePath of previousGenerated.keys()) {
         if (
-          !generated.has(filePath) &&
+          !nextGenerated.has(filePath) &&
           !model.unmanagedFiles.includes(filePath) &&
           !previousModel.unmanagedFiles.includes(filePath)
         ) {
@@ -715,14 +741,58 @@ export class ProjectService {
 }
 
 function sameGeneratedJava(existing: ProjectFileContent | undefined, generated: string): boolean {
-  const normalize = (value: string): string =>
-    value
-      .replace(/\r\n?/gu, '\n')
-      .split('\n')
-      .map((line) => line.trimEnd())
-      .filter((line) => line.length > 0)
-      .join('\n');
-  return typeof existing === 'string' && normalize(existing) === normalize(generated);
+  return typeof existing === 'string' && sameJavaTokens(existing, generated);
+}
+
+/**
+ * Older generators kept nested mechanisms exclusively in project.yaml. When such a mechanism is
+ * deleted, a newer generator may expect unrelated child wiring in the parent's full-file Java and
+ * incorrectly report a layout conflict. If the removed child has no identifier footprint in the
+ * existing parent source, preserving that source is the exact semantic deletion and avoids an
+ * unsafe whole-file regeneration.
+ */
+function isLegacyNestedRemovalNoop(
+  filePath: string,
+  existing: string,
+  previous: FrcProjectModel,
+  next: FrcProjectModel,
+): boolean {
+  if (!filePath.endsWith('.java')) return false;
+  const nextIds = new Set(next.subsystems.map((subsystem) => subsystem.id));
+  const removed = previous.subsystems.filter(
+    (subsystem) => subsystem.parentId !== undefined && !nextIds.has(subsystem.id),
+  );
+  if (removed.length === 0) return false;
+
+  const relevant = removed.filter((subsystem) => {
+    const parent = previous.subsystems.find((candidate) => candidate.id === subsystem.parentId);
+    return parent !== undefined && subsystemJavaLocation(previous, parent).file === filePath;
+  });
+  if (relevant.length === 0) return false;
+
+  const relevantParentIds = new Set(relevant.map((subsystem) => subsystem.parentId));
+  for (const parentId of relevantParentIds) {
+    const oldParent = previous.subsystems.find((subsystem) => subsystem.id === parentId);
+    const newParent = next.subsystems.find((subsystem) => subsystem.id === parentId);
+    if (
+      oldParent === undefined ||
+      newParent === undefined ||
+      JSON.stringify(oldParent) !== JSON.stringify(newParent)
+    ) {
+      return false;
+    }
+    const oldChildren = previous.subsystems.filter((subsystem) => subsystem.parentId === parentId);
+    const newChildren = next.subsystems.filter((subsystem) => subsystem.parentId === parentId);
+    const survivingOldChildren = oldChildren.filter((subsystem) => nextIds.has(subsystem.id));
+    if (JSON.stringify(survivingOldChildren) !== JSON.stringify(newChildren)) return false;
+  }
+
+  return relevant.every((subsystem) => !containsJavaIdentifier(existing, subsystem.symbol));
+}
+
+function containsJavaIdentifier(source: string, identifier: string): boolean {
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(`(^|[^A-Za-z0-9_$])${escaped}([^A-Za-z0-9_$]|$)`, 'u').test(source);
 }
 
 interface PendingChange {

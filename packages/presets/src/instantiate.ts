@@ -56,6 +56,8 @@ export type CommonPresetId =
 
 export interface CommonPresetConfiguration {
   readonly name: string;
+  /** Optional subsystem/mechanism that will own the generated preset root. */
+  readonly parentId?: string;
   readonly canBus?: string;
   readonly canId?: number;
   readonly followerIds?: readonly number[];
@@ -305,16 +307,37 @@ export function instantiateCommonPreset(
   presetId: CommonPresetId,
   config: CommonPresetConfiguration,
 ): FrcProjectModel {
-  ensurePresetMissing(model, presetId);
   const name = config.name.trim();
   if (name.length === 0) throw new Error('Common preset name is required.');
+  const parent =
+    config.parentId === undefined
+      ? undefined
+      : model.subsystems.find((entry) => entry.id === config.parentId);
+  if (config.parentId !== undefined && parent === undefined) {
+    throw new Error('The selected preset parent no longer exists.');
+  }
   const canBus = config.canBus?.trim() || 'rio';
   const canId = config.canId ?? 0;
   const channel = config.channel ?? 0;
   if (presetId !== 'frc.led-indicator' && (!Number.isInteger(canId) || canId < 0 || canId > 62))
     throw new Error('Common preset CAN ID must be between 0 and 62.');
-  const rootId = stableId(`${model.project.id}:preset:${presetId}`);
+  const followerIds = config.followerIds ?? [];
+  if (new Set([canId, ...followerIds]).size !== 1 + followerIds.length) {
+    throw new Error('Leader and follower CAN IDs must be unique.');
+  }
+  if (presetId === 'frc.velocity-flywheel' || presetId === 'frc.position-mechanism') {
+    validateNamedSetpoints(presetId, config.setpoints, config.setpointUnit);
+  }
   const symbol = javaSymbol(name, 'Mechanism');
+  const siblingConflict = model.subsystems.some(
+    (entry) => entry.parentId === config.parentId && entry.symbol === symbol,
+  );
+  if (siblingConflict) {
+    throw new Error(`A node named ${symbol} already exists at the selected location.`);
+  }
+  const rootId = stableId(
+    `${model.project.id}:preset:${presetId}:${config.parentId ?? 'project-root'}:${symbol}`,
+  );
   const goalDriven = [
     'frc.velocity-flywheel',
     'frc.position-mechanism',
@@ -324,17 +347,15 @@ export function instantiateCommonPreset(
     behaviorMode: goalDriven ? 'goal-driven' : 'direct',
     displayName: name,
     id: rootId,
-    kind: 'subsystem',
+    kind: parent === undefined ? 'subsystem' : 'mechanism',
+    ...(parent === undefined ? {} : { parentId: parent.id }),
     realImplementation: true,
     simulationImplementation: true,
     ...(goalDriven
       ? {
           generateGoalCommand: true,
           stateMachine: {
-            states: [
-              state(`${rootId}:idle`, 'Idle', true),
-              state(`${rootId}:active`, 'Active', false),
-            ],
+            states: presetStates(rootId, presetId, config.setpoints),
             transitions: [],
           },
         }
@@ -354,28 +375,47 @@ export function instantiateCommonPreset(
           ? [
               'forwardSoftLimit',
               'forwardSoftLimitEnabled',
+              'kA',
+              'kG',
+              'kS',
+              'kV',
               'reverseSoftLimit',
               'reverseSoftLimitEnabled',
               'zeroingCurrent',
+              'zeroingFilterSize',
               'zeroingVoltage',
             ]
           : presetId === 'frc.velocity-flywheel'
-            ? ['kP', 'kV']
+            ? ['closedLoopRamp', 'kP', 'kI', 'kD', 'kS', 'kV', 'kA']
             : [],
       values:
         presetId === 'frc.position-mechanism'
           ? {
               forwardSoftLimit: 1,
               forwardSoftLimitEnabled: true,
+              kA: 0.1,
+              kD: 0.01,
+              kG: 0.18,
+              kP: 100,
+              kS: 0.18,
+              kV: 6,
               reverseSoftLimit: 0,
               reverseSoftLimitEnabled: true,
               zeroingCurrent: 30,
               zeroingVoltage: -1,
             }
-          : {},
+          : presetId === 'frc.velocity-flywheel'
+            ? {
+                kA: 0.01,
+                kP: 0.25,
+                kS: 0.01,
+                kV: 0.092,
+                neutralMode: 'coast',
+              }
+            : {},
     });
     devices.push(stableDevice(motor, stableId(`${rootId}:motor`), 'primary'));
-    for (const [index, followerId] of (config.followerIds ?? []).entries()) {
+    for (const [index, followerId] of followerIds.entries()) {
       if (!Number.isInteger(followerId) || followerId < 0 || followerId > 62)
         throw new Error('Follower CAN IDs must be between 0 and 62.');
       const follower = instantiateCatalogDevice({
@@ -433,10 +473,12 @@ export function instantiateCommonPreset(
       canId,
       channel,
       followerIds: config.followerIds ?? [],
+      parentId: config.parentId ?? '',
+      rootSubsystemId: rootId,
       setpoints: config.setpoints ?? [],
       setpointUnit: config.setpointUnit ?? '',
     },
-    model.project.id,
+    rootId,
   );
   return {
     ...model,
@@ -444,6 +486,31 @@ export function instantiateCommonPreset(
     presets: [...model.presets, preset],
     subsystems: [...model.subsystems, root],
   };
+}
+
+function validateNamedSetpoints(
+  presetId: 'frc.velocity-flywheel' | 'frc.position-mechanism',
+  configured: readonly string[] | undefined,
+  configuredUnit: string | undefined,
+): void {
+  const setpoints = configured ?? ['IDLE=0', 'ACTIVE=1'];
+  if (setpoints.length === 0) throw new Error('At least one named setpoint is required.');
+  const names: string[] = [];
+  for (const entry of setpoints) {
+    const match = /^\s*([A-Za-z_$][A-Za-z\d_$]*)\s*=\s*(-?(?:\d+(?:\.\d*)?|\.\d+))\s*$/u.exec(
+      entry,
+    );
+    if (match?.[1] === undefined || match[2] === undefined || !Number.isFinite(Number(match[2]))) {
+      throw new Error(`Invalid named setpoint: ${entry}. Use NAME=value.`);
+    }
+    names.push(match[1].toUpperCase());
+  }
+  if (new Set(names).size !== names.length) throw new Error('Named setpoint names must be unique.');
+  const unit = configuredUnit ?? (presetId === 'frc.velocity-flywheel' ? 'rps' : 'rot');
+  const allowed = presetId === 'frc.velocity-flywheel' ? ['rps', 'rpm'] : ['rot', 'deg', 'rad'];
+  if (!allowed.includes(unit)) {
+    throw new Error(`${presetId} setpoint unit must be one of: ${allowed.join(', ')}.`);
+  }
 }
 
 function state(seed: string, displayName: string, initial: boolean) {
@@ -454,6 +521,22 @@ function state(seed: string, displayName: string, initial: boolean) {
     initial,
     symbol: displayName,
   };
+}
+
+function presetStates(
+  rootId: string,
+  presetId: CommonPresetId,
+  configuredSetpoints: readonly string[] | undefined,
+) {
+  const names =
+    presetId === 'frc.velocity-flywheel' || presetId === 'frc.position-mechanism'
+      ? (configuredSetpoints ?? ['IDLE=0', 'ACTIVE=1']).flatMap((entry) => {
+          const match = /^\s*([A-Za-z_$][A-Za-z\d_$]*)\s*=/u.exec(entry);
+          return match?.[1] === undefined ? [] : [match[1]];
+        })
+      : ['IDLE', 'ACTIVE'];
+  const unique = [...new Set(names.length === 0 ? ['IDLE', 'ACTIVE'] : names)];
+  return unique.map((name, index) => state(`${rootId}:goal:${name}`, name, index === 0));
 }
 
 function validateSwerve(config: SwervePresetConfiguration): void {
@@ -505,12 +588,12 @@ function presetInstance(
   presetId: string,
   displayName: string,
   parameters: Readonly<Record<string, ParameterValue>>,
-  projectId: string,
+  instanceSeed: string,
 ): PresetInstance {
   return {
     customizedFiles: [],
     displayName,
-    id: stableId(`${projectId}:${presetId}:instance`),
+    id: stableId(`${instanceSeed}:${presetId}:instance`),
     parameters,
     presetId,
     version: 1,

@@ -82,8 +82,18 @@ public class MotorSubsystem extends SubsystemBase {
         return run(() -> io.setPositionRotations(rotations)).withName(getName() + ".position");
     }
 
+    public Command positionCommand(DoubleSupplier rotations) {
+        return run(() -> io.setPositionRotations(rotations.getAsDouble()))
+                .withName(getName() + ".position");
+    }
+
     public Command velocityCommand(double rotationsPerSecond) {
         return run(() -> io.setVelocityRotationsPerSecond(rotationsPerSecond))
+                .withName(getName() + ".velocity");
+    }
+
+    public Command velocityCommand(DoubleSupplier rotationsPerSecond) {
+        return run(() -> io.setVelocityRotationsPerSecond(rotationsPerSecond.getAsDouble()))
                 .withName(getName() + ".velocity");
     }
 
@@ -129,6 +139,28 @@ public class MotorSubsystem extends SubsystemBase {
 
     public Command zeroPositionCommand() {
         return runOnce(io::zeroPosition).withName(getName() + ".zeroPosition");
+    }
+
+    /**
+     * Drives gently into a known hard stop, requires consecutive over-current samples, then records
+     * that position as zero. Use only after verifying the voltage sign at low power.
+     */
+    public Command zeroAgainstHardStopCommand(
+            double volts, double currentThresholdAmps, int requiredSamples) {
+        int[] overCurrentSamples = {0};
+        return run(
+                        () -> {
+                            io.setVoltage(volts);
+                            overCurrentSamples[0] =
+                                    Math.abs(inputs.currentStatorAmps) >= currentThresholdAmps
+                                            ? overCurrentSamples[0] + 1
+                                            : 0;
+                        })
+                .beforeStarting(() -> overCurrentSamples[0] = 0)
+                .until(() -> overCurrentSamples[0] >= Math.max(1, requiredSamples))
+                .finallyDo(io::stop)
+                .andThen(runOnce(io::zeroPosition))
+                .withName(getName() + ".zeroAgainstHardStop");
     }
 
     public Command sysIdQuasistatic(SysIdRoutine.Direction direction) {

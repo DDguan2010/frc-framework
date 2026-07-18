@@ -674,6 +674,11 @@
 - [x] **CONT-099 P0** 增加三层嵌套、Swerve 内嵌 Goal 节点、删除、Java 回读与真实 WPILib/Phoenix 编译回归测试。
 - [x] **CONT-100 P0** `RobotCommands` 按 requirement 精确注入嵌套节点，不再将 Mechanism 强制提升为顶层 Subsystem。
 - [x] **CONT-101 P0** 设备 Java symbol 按直接拥有者作用域校验，自动 NT 路径加入设备名，支持不同分支同名硬件且不冲突。
+- [x] **CONT-102 P0** 修复 Vite 冷启动依赖优化竞态；Electron 仅在根组件挂载后显示窗口，并增加独立冷缓存开发 smoke test。
+- [x] **CONT-103 P0** 结构化预览仅合并本次模型变化实际影响的生成文件；兼容旧版合并式嵌套 Java 布局，并在真实冲突中报告具体文件路径。
+- [x] **CONT-104 P0** 补齐 Goal、Auto、控制器、绑定、Command、引用和可选参数的删除闭环；安全兼容旧版 full-file preset 的模型专属嵌套节点删除；代码变更默认直接应用，并可在设置中开启确认预览。
+- [x] **CONT-105 P0** 修复重复 `pnpm dev` 与中断启动造成的 Vite/Electron 缓存竞争：开发缓存按进程隔离、依赖强制重建、Electron 单实例恢复，并延长渲染器自动恢复窗口。
+- [x] **CONT-106 P0** 普通预制模块支持在创建时选择任意层级父节点、同类多实例与精确级联删除；Velocity/Position Goal 通过默认 Command 实际驱动闭环目标，单位元数据、换算、参数刷新与真实 Gradle 编译均有回归验证。
 
 ## 14. 首批开发迭代建议
 
@@ -729,3 +734,13 @@
 - [ ] 真实机器人项目试用通过。
 - [ ] 安全、迁移、恢复、跨平台和无软件交接测试通过。
 - [ ] 所有 P0/P1 数据安全问题关闭；其他已知问题有清晰说明。
+
+## 16. 2026-07 完整机器人验收与生成结构收敛
+
+- [x] **CONT-107 P0** 更新检查固定使用 `DDguan2010/frc-framework`；仓库存在但尚无 GitHub Release 时显示正常空状态，不再把 `/releases/latest` 的 404 报为仓库错误。
+- [x] **CONT-108 P0** 参考 10541 将电机节点拆分为相邻的 `<Node>Config.java` 与 `<Node>.java`：前者负责硬件/调参构造，后者负责 Goal、Default Command、局部命令与运行逻辑。
+- [x] **CONT-109 P0** 所有普通生成节点继承 `SubsystemBase`，Goal Command 声明明确 requirement；Java 无 YAML 回读忽略 `*Config`/`*Constants`，避免其变成伪 Subsystem。
+- [x] **CONT-110 P0** Inspector 对所有生成节点始终提供运行代码入口，对有硬件 Config 的节点提供独立“打开硬件配置”入口（中/英双语）。
+- [x] **CONT-111 P0** 新增完整验收机器人：Swerve、Limelight、Intake Roller/Pivot、Shooter 双飞轮/Hood/Feeder、LED、NT、双手柄、Bindings、跨系统 Commands、PathPlanner Named Commands、Auto、Telemetry 与 Docs；真实 WPILib Gradle 格式化、编译、测试及 Java 重新索引通过。
+- [x] **CONT-112 P1** 新增 `docs/GENERATED_PROJECT_ARCHITECTURE.md` 和 `pnpm test:acceptance-robot`，明确 Config/Subsystem/RobotCommands/RobotContainer 的代码放置边界并形成可重复验收闭环。
+- [x] **CONT-113 P0** Swerve 与受支持的 Driver Controller 同时存在时自动生成带 deadband/scale/axis inversion 的 field-relative Default Command；Xbox、PS4、PS5、Joystick 与 Generic HID 均有明确轴映射，完整验收项目已编译验证。

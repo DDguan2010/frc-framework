@@ -142,6 +142,55 @@ describe('preset manifests and instances', () => {
     expect(generatePresetFiles(configured).has('docs/VELOCITY_FLYWHEEL.md')).toBe(true);
   });
 
+  it('creates repeatable common presets directly below the selected parent with correct units', () => {
+    const shooterId = stablePresetEntityId('test:shooter');
+    const base = {
+      ...model(),
+      subsystems: [
+        {
+          displayName: 'Shooter',
+          id: shooterId,
+          kind: 'subsystem' as const,
+          symbol: 'Shooter',
+        },
+      ],
+    };
+    const upper = instantiateCommonPreset(base, 'frc.velocity-flywheel', {
+      canId: 21,
+      name: 'UpperFlywheel',
+      parentId: shooterId,
+      setpoints: ['IDLE=0', 'SPEAKER=90'],
+      setpointUnit: 'rps',
+    });
+    const complete = instantiateCommonPreset(upper, 'frc.velocity-flywheel', {
+      canId: 22,
+      name: 'LowerFlywheel',
+      parentId: shooterId,
+      setpoints: ['IDLE=0', 'SPEAKER=5400'],
+      setpointUnit: 'rpm',
+    });
+    const mechanisms = complete.subsystems.filter((entry) => entry.parentId === shooterId);
+    expect(mechanisms.map((entry) => entry.symbol)).toEqual(['UpperFlywheel', 'LowerFlywheel']);
+    expect(mechanisms.every((entry) => entry.kind === 'mechanism')).toBe(true);
+    expect(complete.presets).toHaveLength(2);
+    expect(new Set(complete.presets.map((entry) => entry.id)).size).toBe(2);
+
+    const upperMotor = complete.devices.find(
+      (device) => device.parentId === mechanisms[0]?.id && device.role === 'primary',
+    );
+    expect(upperMotor?.parameters.find((entry) => entry.key === 'neutralMode')).toMatchObject({
+      enumValues: ['brake', 'coast'],
+      value: 'coast',
+    });
+    expect(
+      upperMotor?.parameters.find((entry) => entry.key === 'neutralMode')?.unit,
+    ).toBeUndefined();
+    expect(validateModel(complete).filter((problem) => problem.severity === 'error')).toEqual([]);
+    const flywheelDoc = generatePresetFiles(complete).get('docs/VELOCITY_FLYWHEEL.md');
+    expect(flywheelDoc).toContain('## UpperFlywheel');
+    expect(flywheelDoc).toContain('## LowerFlywheel');
+  });
+
   it('generates deterministic, ordinary Java and calibration documents', () => {
     const configured = instantiateLimelightPreset(
       instantiateSwervePreset(model(), swerveConfiguration),

@@ -158,7 +158,7 @@ Read these files before changing robot code:
 
 Keep \`RobotContainer\` as a small composition root. Put controller triggers in \`controls/OperatorInterface\`, cross-subsystem command factories in \`commands/RobotCommands\`, local mechanism commands with their subsystem, autonomous composition under \`auto\`, and dashboard/field output under \`telemetry\`.
 
-Every subsystem-tree node is an ordinary Java owner at every depth. A node owns its direct devices, Goals, and local commands; its parent receives the child through constructor injection and exposes a typed accessor. Use the exact source paths in \`docs/SUBSYSTEMS.md\` instead of assuming all nested logic belongs to the root subsystem file.
+Every subsystem-tree node is an ordinary WPILib subsystem owner at every depth. A node's main Java file owns Goals, default commands, and local runtime logic. When it owns motors, its adjacent \`<Node>Config.java\` owns CAN, PID/feedforward, limits, zeroing, and simulation configuration. Parents receive children through constructor injection and expose typed accessors. Use the exact source paths in \`docs/SUBSYSTEMS.md\` instead of assuming all nested logic belongs to the root subsystem file.
 
 Do not edit generated files or blocks marked \`<frc-framework:managed>\` without also updating \`project.yaml\`. Custom Java outside managed blocks is intentionally preserved. Run \`./gradlew spotlessApply compileJava test\` after code changes.
 `;
@@ -182,7 +182,7 @@ Java package: \`${model.project.javaPackage}\`
 
 The Java project builds without FRC Framework. \`project.yaml\` adds structured editing but is not a runtime dependency.
 
-The subsystem tree maps directly to Java packages. For example, \`Intake -> IntakePivot -> ZeroSensorLogic\` becomes \`subsystems/intake/Intake.java\`, \`subsystems/intake/intakePivot/IntakePivot.java\`, and \`subsystems/intake/intakePivot/zeroSensorLogic/ZeroSensorLogic.java\`. Each node owns only its direct hardware and Goal model; \`RobotContainer\` constructs children before parents.
+The subsystem tree maps directly to Java packages. For example, \`Intake -> IntakePivot -> ZeroSensorLogic\` becomes \`subsystems/intake/Intake.java\`, \`subsystems/intake/intakePivot/IntakePivot.java\`, and \`subsystems/intake/intakePivot/zeroSensorLogic/ZeroSensorLogic.java\`. A motor-owning node also gets an adjacent \`IntakePivotConfig.java\`: the runtime file contains Goals/default commands, while Config contains hardware and tuning construction. \`RobotContainer\` constructs children before parents.
 `;
 }
 

@@ -1,4 +1,4 @@
-import type { EntityId, FrcProjectModel } from './model.js';
+import type { EntityId, FrcProjectModel, Subsystem } from './model.js';
 
 export interface SubsystemRemovalPlan {
   readonly model: FrcProjectModel;
@@ -8,6 +8,28 @@ export interface SubsystemRemovalPlan {
   readonly removedDeviceIds: readonly EntityId[];
   readonly removedPresetIds: readonly EntityId[];
   readonly removedSubsystemIds: readonly EntityId[];
+}
+
+/** Removes one Goal/State and repairs the state-machine invariants. */
+export function removeSubsystemState(subsystem: Subsystem, stateId: EntityId): Subsystem {
+  const machine = subsystem.stateMachine;
+  if (machine === undefined || !machine.states.some((state) => state.id === stateId)) {
+    throw new Error(`State ${stateId} does not exist in subsystem ${subsystem.id}.`);
+  }
+  let states = machine.states.filter((state) => state.id !== stateId);
+  if (states.length > 0 && !states.some((state) => state.initial === true)) {
+    states = states.map((state, index) => (index === 0 ? { ...state, initial: true } : state));
+  }
+  return {
+    ...subsystem,
+    stateMachine: {
+      ...machine,
+      states,
+      transitions: machine.transitions.filter(
+        (transition) => transition.fromStateId !== stateId && transition.toStateId !== stateId,
+      ),
+    },
+  };
 }
 
 /**
@@ -96,7 +118,13 @@ export function planSubsystemRemoval(
   );
   const removedPresetIds = new Set(
     model.presets
-      .filter((preset) => removedSubsystemNames.has(preset.displayName))
+      .filter((preset) => {
+        const rootSubsystemId = preset.parameters.rootSubsystemId;
+        return (
+          (typeof rootSubsystemId === 'string' && removedSubsystemIds.has(rootSubsystemId)) ||
+          (rootSubsystemId === undefined && removedSubsystemNames.has(preset.displayName))
+        );
+      })
       .map((preset) => preset.id),
   );
   const removedTargets = new Set([...removedSubsystemIds, ...removedDeviceIds]);

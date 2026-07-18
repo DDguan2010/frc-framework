@@ -119,6 +119,11 @@ describe('JavaProjectIndexer', () => {
       'utf8',
     );
     await writeFile(
+      path.join(pivotSource, 'IntakePivotConfig.java'),
+      'package frc.robot.subsystems.intake.intakePivot; public class IntakePivotConfig {}',
+      'utf8',
+    );
+    await writeFile(
       path.join(sensorSource, 'ZeroSensorLogic.java'),
       'package frc.robot.subsystems.intake.intakePivot.zeroSensorLogic; public class ZeroSensorLogic {}',
       'utf8',
@@ -138,6 +143,9 @@ describe('JavaProjectIndexer', () => {
     );
     expect(sensor?.javaFile).toBe(
       'src/main/java/frc/robot/subsystems/intake/intakePivot/zeroSensorLogic/ZeroSensorLogic.java',
+    );
+    expect(report.model.subsystems.some((entry) => entry.symbol === 'IntakePivotConfig')).toBe(
+      false,
     );
   });
 });

@@ -41,6 +41,7 @@ import type { ProjectService } from './project-service.js';
 import type { SettingsStore } from './settings-store.js';
 import type { NtService } from './nt-service.js';
 import type { ToolchainService } from './toolchain-service.js';
+import { checkGitHubUpdates } from './update-service.js';
 
 export function registerIpcHandlers(
   settings: SettingsStore,
@@ -61,27 +62,7 @@ export function registerIpcHandlers(
     version: app.getVersion(),
   }));
   ipcMain.handle(IPC_CHANNELS.appCheckUpdates, async (): Promise<UpdateCheckResult> => {
-    const response = await fetch(
-      'https://api.github.com/repos/DDguan2010/frc-framework/releases/latest',
-      {
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': `FRC-Framework/${app.getVersion()}`,
-        },
-        signal: AbortSignal.timeout(10_000),
-      },
-    );
-    if (!response.ok) throw new Error(`GitHub Releases returned HTTP ${String(response.status)}.`);
-    const value = (await response.json()) as { html_url?: unknown; tag_name?: unknown };
-    if (typeof value.tag_name !== 'string') throw new Error('GitHub release metadata is invalid.');
-    const latestVersion = value.tag_name.replace(/^v/u, '');
-    return {
-      checkedAt: new Date().toISOString(),
-      currentVersion: app.getVersion(),
-      latestVersion,
-      ...(typeof value.html_url === 'string' ? { releaseUrl: value.html_url } : {}),
-      updateAvailable: compareVersions(latestVersion, app.getVersion()) > 0,
-    };
+    return checkGitHubUpdates(app.getVersion());
   });
 
   ipcMain.handle(IPC_CHANNELS.settingsGet, (): AppSettings => settings.state.settings);
@@ -242,16 +223,6 @@ export function registerIpcHandlers(
         : projects.relinkRecent(oldPath, selectedPath);
     },
   );
-}
-
-function compareVersions(left: string, right: string): number {
-  const leftParts = left.split(/[.-]/u).map((part) => Number.parseInt(part, 10) || 0);
-  const rightParts = right.split(/[.-]/u).map((part) => Number.parseInt(part, 10) || 0);
-  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
-    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
 }
 
 export function unregisterIpcHandlers(): void {

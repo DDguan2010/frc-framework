@@ -12,6 +12,7 @@ describe('SettingsStore', () => {
     const filePath = path.join(directory, 'state.json');
     const store = new SettingsStore(filePath);
     await store.load();
+    expect(store.state.settings.previewChanges).toBe(false);
     await store.updateSettings({ language: 'zh-CN', logLevel: 'debug' });
     await store.updateSettings({
       externalTools: {
@@ -55,6 +56,27 @@ describe('SettingsStore', () => {
     await reopened.load();
     expect(reopened.state.recentProjects[0]?.displayName).toBe('Renamed');
     expect(reopened.state.settings.projectUi['C:\\Robot']?.treeMode).toBe('logic');
+  });
+
+  it('migrates the old preview-by-default setting once and preserves later user choices', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-settings-migration-'));
+    const filePath = path.join(directory, 'state.json');
+    await writeFile(
+      filePath,
+      JSON.stringify({ settings: { previewChanges: true }, recentProjects: [], window: {} }),
+      'utf8',
+    );
+    const store = new SettingsStore(filePath);
+    await store.load();
+    expect(store.state.settings.previewChanges).toBe(false);
+    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(
+      expect.objectContaining({ settingsVersion: 2 }),
+    );
+
+    await store.updateSettings({ previewChanges: true });
+    const reopened = new SettingsStore(filePath);
+    await reopened.load();
+    expect(reopened.state.settings.previewChanges).toBe(true);
   });
 
   it('recovers defaults and quarantines a corrupt settings file', async () => {

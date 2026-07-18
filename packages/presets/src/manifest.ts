@@ -170,7 +170,12 @@ function commonPresetManifests(): readonly PresetManifest[] {
     quickStart: commonPresetCopy(id).quickStart,
     documentation,
     id,
-    outputs: ['project.yaml', documentation],
+    outputs: [
+      'project.yaml',
+      'subsystems/<selected parent>/<Name>.java',
+      ...(id === 'frc.led-indicator' ? [] : ['subsystems/<selected parent>/<Name>Config.java']),
+      documentation,
+    ],
     parameters: [
       {
         defaultValue: displayName,

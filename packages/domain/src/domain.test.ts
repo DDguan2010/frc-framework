@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DomainSession } from './history.js';
-import { planSubsystemRemoval } from './deletion.js';
+import { planSubsystemRemoval, removeSubsystemState } from './deletion.js';
 import { subsystemJavaLocation } from './java-location.js';
 import { createEmptyProject, createEntityId, PRODUCT_NAME, type Subsystem } from './model.js';
 import { validateModel } from './validation.js';
@@ -16,6 +16,38 @@ function fixture() {
 }
 
 describe('domain model', () => {
+  it('removes goals while repairing the initial state and transitions', () => {
+    const idleId = createEntityId();
+    const activeId = createEntityId();
+    const subsystem: Subsystem = {
+      displayName: 'Intake Pivot',
+      id: createEntityId(),
+      kind: 'mechanism',
+      stateMachine: {
+        states: [
+          { actions: [], displayName: 'Idle', id: idleId, initial: true, symbol: 'Idle' },
+          { actions: [], displayName: 'Active', id: activeId, symbol: 'Active' },
+        ],
+        transitions: [
+          {
+            fromStateId: idleId,
+            id: createEntityId(),
+            toStateId: activeId,
+            trigger: 'enabled',
+          },
+        ],
+      },
+      symbol: 'IntakePivot',
+    };
+
+    const removed = removeSubsystemState(subsystem, idleId);
+    expect(removed.stateMachine?.states).toEqual([
+      expect.objectContaining({ id: activeId, initial: true }),
+    ]);
+    expect(removed.stateMachine?.transitions).toEqual([]);
+    expect(() => removeSubsystemState(removed, idleId)).toThrow('does not exist');
+  });
+
   it('creates a valid project with stable UUID identities', () => {
     const model = fixture();
     expect(PRODUCT_NAME).toBe('FRC Framework');

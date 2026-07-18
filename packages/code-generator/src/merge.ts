@@ -12,7 +12,11 @@ export function mergeGeneratedJava(existing: string | undefined, generated: stri
   // Some preset implementations are generated as complete Java files rather
   // than mixed managed/custom regions. An unchanged file is already the exact
   // candidate we want and must not block unrelated structured edits.
-  if (generatedBlocks.length === 0 && existingBlocks.length === 0 && existing === generated) {
+  if (
+    generatedBlocks.length === 0 &&
+    existingBlocks.length === 0 &&
+    sameJavaTokens(existing, generated)
+  ) {
     return existing;
   }
   if (generatedBlocks.length === 0 || existingBlocks.length !== generatedBlocks.length) {
@@ -23,6 +27,12 @@ export function mergeGeneratedJava(existing: string | undefined, generated: stri
   let blockIndex = 0;
   const merged = existing.replace(managedBlock, () => generatedBlocks[blockIndex++]?.[0] ?? '');
   return mergeImports(merged, generated);
+}
+
+/** Compares Java while ignoring formatter-only whitespace outside literals and comments. */
+export function sameJavaTokens(left: string, right: string): boolean {
+  if (left.includes('"""') || right.includes('"""')) return left === right;
+  return normalizeJavaWhitespace(left) === normalizeJavaWhitespace(right);
 }
 
 /** Preserves the documented user supplement region while refreshing generated Markdown. */
@@ -46,4 +56,47 @@ function mergeImports(existing: string, generated: string): string {
   const packageEnd = withoutImports.indexOf(';');
   if (packageEnd < 0) throw new Error('Java source does not contain a package declaration.');
   return `${withoutImports.slice(0, packageEnd + 1)}\n\n${imports.join('\n')}\n${withoutImports.slice(packageEnd + 1).replace(/^\s*/u, '\n')}`;
+}
+
+function normalizeJavaWhitespace(source: string): string {
+  const normalizedSource = source.replace(/\r\n?/gu, '\n');
+  let result = '';
+  let index = 0;
+  let state: 'normal' | 'string' | 'character' | 'line-comment' | 'block-comment' = 'normal';
+  while (index < normalizedSource.length) {
+    const character = normalizedSource[index] ?? '';
+    const next = normalizedSource[index + 1] ?? '';
+    if (state === 'normal') {
+      if (/\s/u.test(character)) {
+        if (result.length > 0 && !result.endsWith(' ')) result += ' ';
+        index += 1;
+        continue;
+      }
+      if (character === '"') state = 'string';
+      else if (character === "'") state = 'character';
+      else if (character === '/' && next === '/') state = 'line-comment';
+      else if (character === '/' && next === '*') state = 'block-comment';
+      result += character;
+      index += 1;
+      continue;
+    }
+    result += character;
+    if ((state === 'string' || state === 'character') && character === '\\') {
+      result += next;
+      index += 2;
+      continue;
+    }
+    if (state === 'string' && character === '"') state = 'normal';
+    else if (state === 'character' && character === "'") state = 'normal';
+    else if (state === 'line-comment' && (character === '\n' || character === '\r'))
+      state = 'normal';
+    else if (state === 'block-comment' && character === '*' && next === '/') {
+      result += next;
+      index += 2;
+      state = 'normal';
+      continue;
+    }
+    index += 1;
+  }
+  return result.trim();
 }

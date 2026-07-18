@@ -70,9 +70,10 @@ describe.runIf(referencesAvailable)('local reference robot projects', () => {
         customFiles: 86,
         files: 127,
         partialFiles: 0,
-        subsystems: 13,
+        subsystems: 7,
       });
       expect(report.model.subsystems.some((entry) => entry.displayName === 'Shooter')).toBe(true);
+      expect(report.model.subsystems.some((entry) => entry.symbol.endsWith('Config'))).toBe(false);
       expect(report.model.controllers.length).toBeGreaterThanOrEqual(2);
       expect(report.model.bindings.length).toBeGreaterThan(10);
       expect(report.model.commands.length).toBeGreaterThan(10);

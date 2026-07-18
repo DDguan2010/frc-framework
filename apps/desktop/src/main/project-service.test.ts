@@ -49,6 +49,15 @@ describe('ProjectService structured edits', () => {
       ),
       'utf8',
     );
+    const staleFullFilePath = path.join(
+      root,
+      'src/main/java/frc/robot/subsystems/swerve/SwerveConfig.java',
+    );
+    await writeFile(
+      staleFullFilePath,
+      `${await readFile(staleFullFilePath, 'utf8')}\n// Output retained from an older generator version.\n`,
+      'utf8',
+    );
     const store = new SettingsStore(path.join(stateRoot, 'state.json'));
     await store.load();
     const service = new ProjectService(store, path.resolve('resources/base-template'));
@@ -168,6 +177,154 @@ describe('ProjectService structured edits', () => {
       expect(removed.model?.subsystems.some((subsystem) => subsystem.id === arm.id)).toBe(false);
       const commandIds = removed.model?.commands.map((command) => command.id) ?? [];
       expect(new Set(commandIds).size).toBe(commandIds.length);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('deletes a nested node created by the legacy combined-file layout', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-service-legacy-nested-'));
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-legacy-nested-state-'));
+    const intakeId = createEntityId();
+    const pivotId = createEntityId();
+    const base = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'Legacy Nested Robot',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    const model = {
+      ...base,
+      subsystems: [
+        {
+          behaviorMode: 'goal-driven' as const,
+          displayName: 'Intake',
+          id: intakeId,
+          kind: 'subsystem' as const,
+          symbol: 'Intake',
+        },
+        {
+          behaviorMode: 'goal-driven' as const,
+          displayName: 'Intake Pivot',
+          id: pivotId,
+          kind: 'mechanism' as const,
+          parentId: intakeId,
+          symbol: 'IntakePivot',
+        },
+      ],
+    };
+    await writeFile(path.join(root, 'project.yaml'), stringifyProjectYaml(model), 'utf8');
+    const intakePath = path.join(root, 'src/main/java/frc/robot/subsystems/intake/Intake.java');
+    await mkdir(path.dirname(intakePath), { recursive: true });
+    await writeFile(
+      intakePath,
+      `package frc.robot.subsystems.intake;
+
+public final class Intake {
+    // <frc-framework:managed>
+    // IntakePivot was embedded here by the legacy generator.
+    // </frc-framework:managed>
+
+    public int teamOwnedDiagnostic() { return 10541; }
+}
+`,
+      'utf8',
+    );
+
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      await service.open(root);
+      const preview = await service.previewCommand({
+        collection: 'subsystems',
+        id: pivotId,
+        type: 'remove',
+      });
+      expect(preview.problems).toEqual([]);
+      expect(preview.changes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'modified',
+            path: 'src/main/java/frc/robot/subsystems/intake/Intake.java',
+          }),
+        ]),
+      );
+      const applied = await service.applyPreview(preview.id);
+      expect(applied.model?.subsystems.some((entry) => entry.id === pivotId)).toBe(false);
+      expect(await readFile(intakePath, 'utf8')).toContain('teamOwnedDiagnostic');
+      expect(await readFile(intakePath, 'utf8')).not.toContain('embedded here');
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('deletes a model-only child from an older full-file preset without regenerating team Java', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-service-old-preset-'));
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-old-preset-state-'));
+    const base = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'Old Preset Robot',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    const swerve = instantiateSwervePreset(base, {
+      canBus: 'rio',
+      driveIds: [1, 2, 3, 4],
+      driveRatio: 6.75,
+      encoderIds: [9, 10, 11, 12],
+      encoderOffsets: [0, 0, 0, 0],
+      gyroId: 13,
+      maxSpeed: 4.5,
+      steerIds: [5, 6, 7, 8],
+      steerRatio: 12.8,
+      trackwidth: 0.55,
+      wheelRadius: 0.05,
+      wheelbase: 0.55,
+    });
+    const swerveRoot = swerve.subsystems.find((subsystem) => subsystem.parentId === undefined);
+    if (swerveRoot === undefined) throw new Error('Expected the Swerve root subsystem.');
+    const accidentalId = createEntityId();
+    const model = {
+      ...swerve,
+      subsystems: [
+        ...swerve.subsystems,
+        {
+          behaviorMode: 'direct' as const,
+          displayName: 'intake',
+          id: accidentalId,
+          kind: 'mechanism' as const,
+          parentId: swerveRoot.id,
+          symbol: 'intake',
+        },
+      ],
+    };
+    await writeStructuredFixture(root, model);
+    const javaPath = 'src/main/java/frc/robot/subsystems/swerve/SwerveSubsystem.java';
+    const legacyJava = generateStructuredFiles({
+      ...swerve,
+      subsystems: [swerveRoot],
+    }).get(javaPath);
+    if (typeof legacyJava !== 'string') throw new Error('Expected generated legacy Java.');
+    await writeFile(path.join(root, javaPath), legacyJava, 'utf8');
+
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      await service.open(root);
+      const preview = await service.previewCommand({
+        collection: 'subsystems',
+        id: accidentalId,
+        type: 'remove',
+      });
+      expect(preview.problems).toEqual([]);
+      expect(preview.changes.find((change) => change.path === javaPath)?.kind).not.toBe('modified');
+      const applied = await service.applyPreview(preview.id);
+      expect(applied.model?.subsystems.some((subsystem) => subsystem.id === accidentalId)).toBe(
+        false,
+      );
+      expect(await readFile(path.join(root, javaPath), 'utf8')).toBe(legacyJava);
     } finally {
       await service.close();
     }

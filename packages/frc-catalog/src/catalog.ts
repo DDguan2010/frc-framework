@@ -509,7 +509,7 @@ const definitions: readonly ComponentDefinition[] = [
       }),
       parameter('setpointUnit', 'Setpoint unit', 'control', 'enum', 'rot', 'position.unit', {
         common: true,
-        enumValues: ['rot', 'deg', 'rad', 'm'],
+        enumValues: ['rot', 'deg', 'rad'],
       }),
       parameter('tolerance', 'At-goal tolerance', 'control', 'number', 0.01, 'position.tolerance', {
         minimum: 0,
@@ -535,7 +535,7 @@ const definitions: readonly ComponentDefinition[] = [
       }),
       parameter('setpointUnit', 'Setpoint unit', 'control', 'enum', 'rps', 'velocity.unit', {
         common: true,
-        enumValues: ['rps', 'rpm', 'm/s'],
+        enumValues: ['rps', 'rpm'],
       }),
       parameter('tolerance', 'At-goal tolerance', 'control', 'number', 1, 'velocity.tolerance', {
         minimum: 0,

@@ -7,6 +7,7 @@ export const en = {
   'app.acknowledgements': 'Acknowledgements',
   'app.name': 'FRC Framework',
   'app.noProject': 'No project open',
+  'app.noReleases': 'The repository is connected, but no GitHub Release has been published yet.',
   'app.openFolder': 'Open folder',
   'app.opening': 'Opening…',
   'app.tagline':
@@ -84,6 +85,7 @@ export const en = {
   'inspector.ntDisabled': 'NT tuning disabled',
   'inspector.ntChipLabel': 'NetworkTables (NT)',
   'inspector.openCode': 'Open code',
+  'inspector.openConfig': 'Open hardware config',
   'inspector.parameters': 'Parameters',
   'inspector.references': 'Dependencies',
   'inspector.referencePreview': 'Review cross-subsystem reference',
@@ -119,6 +121,8 @@ export const en = {
   'presets.limelightTransform': 'Robot-to-camera x, y, z, roll, pitch, yaw',
   'presets.maxSpeed': 'Maximum speed (m/s)',
   'presets.module': 'Preset module',
+  'presets.parent': 'Parent location',
+  'presets.projectRoot': 'Project root (top-level subsystem)',
   'presets.quickStart': 'Before adding',
   'presets.readyDefaults':
     'The form starts with working example values. Review hardware IDs and measurements, then apply the generated Diff.',
@@ -311,7 +315,7 @@ export const en = {
   'workspace.docs': 'Generate English project docs',
   'workspace.folderMissing': 'No folder selected',
   'workspace.name': 'Project name',
-  'workspace.preview': 'Preview every code change',
+  'workspace.preview': 'Review changes before applying',
   'workspace.subtitle': 'Official Material Design 3 component baseline',
   'workspace.title': 'Workspace preview',
   'workspace.type': 'Project type',
@@ -322,6 +326,8 @@ export const en = {
 export type TranslationKey = keyof typeof en;
 
 export const zhCN: Record<TranslationKey, string> = {
+  'presets.parent': '所属父级',
+  'presets.projectRoot': '项目根级（顶层 Subsystem）',
   'app.about': '关于',
   'app.baseVersion': 'Base 版本',
   'app.checkUpdates': '检查更新',
@@ -330,6 +336,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'app.acknowledgements': '鸣谢',
   'app.name': 'FRC Framework',
   'app.noProject': '未打开项目',
+  'app.noReleases': '已连接到正确仓库，但目前还没有发布 GitHub Release。',
   'app.openFolder': '打开文件夹',
   'app.opening': '正在打开…',
   'app.tagline': '一个冷静、结构清晰，同时保留普通 FRC Java 工程可读性的工作空间。',
@@ -406,6 +413,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'inspector.ntDisabled': '已关闭 NT 调参',
   'inspector.ntChipLabel': 'NetworkTables（NT）',
   'inspector.openCode': '打开代码',
+  'inspector.openConfig': '打开硬件配置',
   'inspector.parameters': '参数',
   'inspector.references': '依赖',
   'inspector.referencePreview': '检查跨 Subsystem 引用',
@@ -631,7 +639,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'workspace.docs': '生成英文项目文档',
   'workspace.folderMissing': '未选择文件夹',
   'workspace.name': '项目名称',
-  'workspace.preview': '预览每次代码变更',
+  'workspace.preview': '应用前预览并确认变更',
   'workspace.subtitle': 'Google 官方 Material Design 3 组件基线',
   'workspace.title': '工作空间预览',
   'workspace.type': '项目类型',

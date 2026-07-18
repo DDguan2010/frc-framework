@@ -10,6 +10,7 @@ export type PresetGeneratedFiles = ReadonlyMap<string, string>;
 
 export function generatePresetFiles(model: FrcProjectModel): PresetGeneratedFiles {
   const files = new Map<string, string>();
+  const commonPresets = new Map<string, PresetInstance[]>();
   const packagePath = model.project.javaPackage.replace(/\./gu, '/');
   for (const preset of [...model.presets].sort((left, right) =>
     left.presetId.localeCompare(right.presetId),
@@ -25,8 +26,13 @@ export function generatePresetFiles(model: FrcProjectModel): PresetGeneratedFile
       }
       files.set('docs/LIMELIGHT.md', limelightDocument(preset));
     } else if (preset.presetId.startsWith('frc.')) {
-      files.set(commonPresetDocumentPath(preset.presetId), commonPresetDocument(preset));
+      const instances = commonPresets.get(preset.presetId) ?? [];
+      instances.push(preset);
+      commonPresets.set(preset.presetId, instances);
     }
+  }
+  for (const [presetId, instances] of commonPresets) {
+    files.set(commonPresetDocumentPath(presetId), commonPresetDocument(instances));
   }
   return new Map([...files.entries()].sort(([left], [right]) => left.localeCompare(right)));
 }
@@ -35,19 +41,28 @@ function commonPresetDocumentPath(presetId: string): string {
   return `docs/${presetId.slice(4).replaceAll('-', '_').toUpperCase()}.md`;
 }
 
-function commonPresetDocument(preset: PresetInstance): string {
-  return `# ${preset.displayName}
+function commonPresetDocument(presets: readonly PresetInstance[]): string {
+  const preset = presets[0];
+  if (preset === undefined) return '';
+  const instances = presets
+    .map(
+      (instance) => `## ${instance.displayName}
 
-Generated from the \`${preset.presetId}\` common mechanism preset. The runtime implementation remains ordinary WPILib/IronPulse Java.
-
-## Configuration
-
-${Object.entries(preset.parameters)
+${Object.entries(instance.parameters)
   .map(
     ([key, configured]) =>
       `- ${key}: \`${Array.isArray(configured) ? configured.join(', ') : String(configured)}\``,
   )
-  .join('\n')}
+  .join('\n')}`,
+    )
+    .join('\n\n');
+  return `# ${preset.presetId.slice(4).replaceAll('-', ' ')}
+
+Generated from the \`${preset.presetId}\` common mechanism preset. The runtime implementation remains ordinary WPILib/IronPulse Java.
+
+## Instances
+
+${instances}
 
 ## Bring-up
 

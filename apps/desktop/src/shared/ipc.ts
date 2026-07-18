@@ -60,6 +60,7 @@ export interface UpdateCheckResult {
   readonly currentVersion: string;
   readonly latestVersion?: string;
   readonly releaseUrl?: string;
+  readonly releasePublished: boolean;
   readonly updateAvailable: boolean;
   readonly checkedAt: string;
 }

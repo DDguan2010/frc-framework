@@ -243,7 +243,13 @@ function inferSubsystems(
   const candidates = files.flatMap((file) => {
     const match = /(?:^|\/)subsystems\/(.+)\.java$/u.exec(file.path);
     const primary = file.index.types.find((type) => type.kind === 'class');
-    if (match === null || primary === undefined) return [];
+    if (
+      match === null ||
+      primary === undefined ||
+      primary.name.endsWith('Config') ||
+      primary.name.endsWith('Constants')
+    )
+      return [];
     const segments = match[1]?.split('/') ?? [];
     const directories = segments.slice(0, -1);
     const directory = directories.join('/');

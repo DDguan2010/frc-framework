@@ -241,6 +241,24 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect(
       page.getByRole('heading', { name: i18n.t('settings.externalTools') }),
     ).toBeVisible();
+    const reviewChangesSwitch = page.getByRole('switch', {
+      name: i18n.t('workspace.preview'),
+    });
+    expect(
+      await page.locator('frc-framework-app').evaluate((element) => {
+        const shell = element as HTMLElement & { settings?: { previewChanges?: boolean } };
+        return shell.settings?.previewChanges;
+      }),
+    ).toBe(false);
+    await clickMaterialButton(page, reviewChangesSwitch);
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          const shell = element as HTMLElement & { settings?: { previewChanges?: boolean } };
+          return shell.settings?.previewChanges;
+        }),
+      )
+      .toBe(true);
     expect(
       await page.locator('frc-framework-app').evaluate((element) => {
         const shell = element as HTMLElement & {
@@ -397,7 +415,7 @@ test('production shell is secure, accessible, and interactive', async () => {
       timeout: 60_000,
     });
     await waitForExternalSync(page);
-    const rollerSubsystem = page.getByRole('treeitem', { name: 'Roller subsystem' });
+    const rollerSubsystem = page.getByRole('treeitem', { name: 'Roller mechanism' });
     await expect(rollerSubsystem).toBeVisible({ timeout: 15_000 });
     const rollerMotor = page.getByRole('treeitem', { name: 'Roller Motor motor' });
     if (!(await rollerMotor.isVisible())) {

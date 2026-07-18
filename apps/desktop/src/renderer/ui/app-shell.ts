@@ -3,6 +3,7 @@ import {
   createEntityId,
   javaSymbol,
   planSubsystemRemoval,
+  removeSubsystemState,
   subsystemJavaLocation,
   validateModel,
   type AppInfo,
@@ -37,6 +38,7 @@ import {
 } from '@frc-framework/nt-client/tuning';
 import { css, html, LitElement, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import { keyed } from 'lit/directives/keyed.js';
 
 import frameworkLogo from '../assets/frameworklogo.svg?url';
 
@@ -81,7 +83,7 @@ const fallbackSettings: AppSettings = {
   },
   language: 'system',
   logLevel: 'info',
-  previewChanges: true,
+  previewChanges: false,
   projectEditors: {},
   projectUi: {},
   theme: 'dark',
@@ -794,7 +796,9 @@ export class AppShell extends LitElement {
   @state() private draggedEntityId: string | undefined;
   @state() private presetKind: string = 'frc.swerve';
   @state() private commonPresetName = 'Mechanism';
+  @state() private commonPresetParentId = '';
   @state() private commonPresetCanId = '20';
+  @state() private commonPresetCanBus = 'rio';
   @state() private commonPresetFollowers = '';
   @state() private commonPresetChannel = '0';
   @state() private commonPresetSetpoints = 'IDLE=0, ACTIVE=1';
@@ -1278,7 +1282,7 @@ export class AppShell extends LitElement {
           <h1>${t('presets.title')}</h1>
         </div>
         <md-filled-button
-          @click=${() => this.dialog('preset-dialog')?.show()}
+          @click=${this.openPresetDialog}
           ?disabled=${this.project?.needsImportConfirmation === true}
           >${t('presets.add')}</md-filled-button
         >
@@ -1796,6 +1800,11 @@ export class AppShell extends LitElement {
                     <span class="row">
                       <span class="tree-badge">${auto.pathFiles.join(' · ') || 'Command'}</span>
                       ${auto.pathFiles[0] === undefined ? nothing : html`<md-icon-button aria-label=${t('auto.openPath')} @click=${() => this.openSourceFile(`src/main/deploy/${auto.pathFiles[0] ?? ''}`)}><md-icon>open_in_new</md-icon></md-icon-button>`}
+                      <md-icon-button
+                        aria-label=${t('tree.delete')}
+                        @click=${() => this.removeCollectionEntity('autos', auto.id)}
+                        ><md-icon>delete</md-icon></md-icon-button
+                      >
                     </span>
                   </div>`,
               )
@@ -1827,7 +1836,14 @@ export class AppShell extends LitElement {
               <span
                 >${controller.displayName}${typeof controller.parameters?.layout === 'string' && controller.parameters.layout.length > 0 ? html`<br /><span class="muted">${controller.parameters.layout}</span>` : nothing}</span
               >
-              <span class="tree-badge">${controller.provider} · USB ${controller.port}</span>
+              <span class="row">
+                <span class="tree-badge">${controller.provider} · USB ${controller.port}</span>
+                <md-icon-button
+                  aria-label=${t('tree.delete')}
+                  @click=${() => this.removeControllerEntity(controller.id)}
+                  ><md-icon>delete</md-icon></md-icon-button
+                >
+              </span>
             </div>`,
         )}
         ${model.bindings.map((binding) => {
@@ -1845,6 +1861,11 @@ export class AppShell extends LitElement {
               >${binding.behavior} → ${command?.displayName ?? 'custom'}</span
             >
             ${binding.behavior !== 'custom' ? nothing : html`<md-icon-button aria-label=${t('inspector.openCode')} @click=${() => this.openSourceFile(command?.javaFile ?? 'src/main/java')}><md-icon>code</md-icon></md-icon-button>`}
+            <md-icon-button
+              aria-label=${t('tree.delete')}
+              @click=${() => this.removeCollectionEntity('bindings', binding.id)}
+              ><md-icon>delete</md-icon></md-icon-button
+            >
           </div>`;
         })}
       </div>
@@ -1870,10 +1891,17 @@ export class AppShell extends LitElement {
                 ${requirements || t('commands.noRequirements')}</span
               ></span
             >
-            <span class="tree-badge"
-              >${command.kind} ·
-              ${command.factory === false ? t('commands.instance') : t('commands.factory')}${command.pathplannerName === undefined ? '' : ` · PathPlanner: ${command.pathplannerName}`}</span
-            >
+            <span class="row">
+              <span class="tree-badge"
+                >${command.kind} ·
+                ${command.factory === false ? t('commands.instance') : t('commands.factory')}${command.pathplannerName === undefined ? '' : ` · PathPlanner: ${command.pathplannerName}`}</span
+              >
+              <md-icon-button
+                aria-label=${t('tree.delete')}
+                @click=${() => this.removeCommand(command.id)}
+                ><md-icon>delete</md-icon></md-icon-button
+              >
+            </span>
           </div>`;
         })}
       </div>
@@ -1939,6 +1967,19 @@ export class AppShell extends LitElement {
     const referenceTargets = model.subsystems.filter(
       (entry) => entry.parentId === undefined && entry.id !== selected.id,
     );
+    const runtimeFile = subsystemJavaLocation(model, selected).file;
+    const hasGeneratedConfig =
+      selected.symbol === 'SwerveSubsystem' ||
+      model.devices.some(
+        (device) =>
+          device.parentId === selected.id &&
+          device.kind === 'motor' &&
+          !device.role?.startsWith('swerve-'),
+      );
+    const configFile =
+      selected.symbol === 'SwerveSubsystem'
+        ? runtimeFile.replace(/SwerveSubsystem\.java$/u, 'SwerveConfig.java')
+        : runtimeFile.replace(/\.java$/u, 'Config.java');
     return html`
       <section class="inspector-section">
         <span class="muted">${selected.kind}</span>
@@ -1981,15 +2022,31 @@ export class AppShell extends LitElement {
                   ></md-switch
                   ><span>${t('structured.goalLogging')}</span></label
                 >
+                <div class="hierarchy-list">
+                  ${(selected.stateMachine?.states ?? []).map(
+                    (goal) =>
+                      html`<div class="hierarchy-row">
+                        <span
+                          ><strong>${goal.displayName}</strong><br /><span class="muted"
+                            >${goal.symbol}${goal.initial === true ? ' · initial' : ''}</span
+                          ></span
+                        >
+                        <md-icon-button
+                          aria-label=${`${t('tree.delete')} ${goal.displayName}`}
+                          @click=${() => this.removeGoal(selected, goal.id)}
+                          ><md-icon>delete</md-icon></md-icon-button
+                        >
+                      </div>`,
+                  )}
+                </div>
               `
         }
-        ${
-          selected.javaFile === undefined
-            ? nothing
-            : html`<md-outlined-button @click=${() => this.openSourceFile(selected.javaFile ?? '')}
-                >${t('inspector.openCode')}</md-outlined-button
-              >`
-        }
+        <div class="row">
+          <md-outlined-button @click=${() => this.openSourceFile(runtimeFile)}
+            >${t('inspector.openCode')}</md-outlined-button
+          >
+          ${hasGeneratedConfig ? html`<md-outlined-button @click=${() => this.openSourceFile(configFile)}>${t('inspector.openConfig')}</md-outlined-button>` : nothing}
+        </div>
       </section>
       <section class="inspector-section">
         <span class="muted">${t('inspector.references')}</span>
@@ -1997,9 +2054,16 @@ export class AppShell extends LitElement {
           const target = model.subsystems.find(
             (entry) => entry.id === dependency.targetSubsystemId,
           );
-          return html`<span
-            >${dependency.fieldName}: ${target?.displayName ?? dependency.targetSubsystemId}</span
-          >`;
+          return html`<div class="hierarchy-row">
+            <span
+              >${dependency.fieldName}: ${target?.displayName ?? dependency.targetSubsystemId}</span
+            >
+            <md-icon-button
+              aria-label=${`${t('tree.delete')} ${dependency.fieldName}`}
+              @click=${() => this.removeSubsystemReference(selected, dependency.targetSubsystemId)}
+              ><md-icon>delete</md-icon></md-icon-button
+            >
+          </div>`;
         })}
         ${
           referenceTargets.length === 0
@@ -2039,56 +2103,68 @@ export class AppShell extends LitElement {
               (entry) => entry.key === parameter.key,
             );
             const ntEnabled = parameter.networkTables?.enabled !== false;
-            return html`
-              <div class="parameter-row" data-field=${`parameters.${parameter.key}`}>
-                <span class="parameter-copy">
-                  <strong>${parameter.displayName}</strong>
-                  <span class="muted">${parameter.unit ?? parameter.type}</span>
-                  <span class="muted parameter-description"
-                    >${this.parameterDescription(parameter, catalogParameter)}</span
-                  >
-                </span>
-                <div class="parameter-control-row">
-                  ${
-                    parameter.type === 'boolean'
-                      ? html`<md-switch
-                          aria-label=${parameter.displayName}
-                          ?selected=${parameter.value === true}
-                          @change=${(event: Event) => this.updateParameter(device, parameter.key, (event.target as HTMLElement & { selected: boolean }).selected)}
-                        ></md-switch>`
-                      : parameter.type === 'enum'
-                        ? html`<md-outlined-select
+            return keyed(
+              `${parameter.id}:${JSON.stringify(parameter.value)}`,
+              html`
+                <div class="parameter-row" data-field=${`parameters.${parameter.key}`}>
+                  <span class="parameter-copy">
+                    <strong>${parameter.displayName}</strong>
+                    <span class="muted">${parameter.unit ?? parameter.type}</span>
+                    <span class="muted parameter-description"
+                      >${this.parameterDescription(parameter, catalogParameter)}</span
+                    >
+                  </span>
+                  <div class="parameter-control-row">
+                    ${
+                      parameter.type === 'boolean'
+                        ? html`<md-switch
                             aria-label=${parameter.displayName}
-                            .value=${String(parameter.value)}
-                            @change=${(event: Event) => this.updateParameter(device, parameter.key, inputValue(event))}
-                          >
-                            ${(parameter.enumValues ?? []).map(
-                              (value) =>
-                                html`<md-select-option value=${value}
-                                  ><div slot="headline">${value}</div></md-select-option
-                                >`,
-                            )}
-                          </md-outlined-select>`
-                        : html`<md-outlined-text-field
-                            aria-label=${parameter.displayName}
-                            .value=${this.parameterText(parameter.value)}
-                            placeholder=${parameter.key === 'setpoints' ? 'HOME=0, SPEAKER=85' : ''}
-                            @change=${(event: Event) => this.updateParameter(device, parameter.key, this.parseParameterValue(parameter.type, inputValue(event)))}
-                          ></md-outlined-text-field>`
-                  }
-                  <md-filter-chip
-                    label=${t('inspector.ntChipLabel')}
-                    ?selected=${ntEnabled}
-                    aria-label=${ntEnabled ? t('inspector.ntEnabled') : t('inspector.ntDisabled')}
-                    @click=${() => this.toggleParameterNt(device, parameter.key)}
-                  ></md-filter-chip>
+                            ?selected=${parameter.value === true}
+                            @change=${(event: Event) => this.updateParameter(device, parameter.key, (event.target as HTMLElement & { selected: boolean }).selected)}
+                          ></md-switch>`
+                        : parameter.type === 'enum'
+                          ? html`<md-outlined-select
+                              aria-label=${parameter.displayName}
+                              .value=${String(parameter.value)}
+                              @change=${(event: Event) => this.updateParameter(device, parameter.key, inputValue(event))}
+                            >
+                              ${(parameter.enumValues ?? []).map(
+                                (value) =>
+                                  html`<md-select-option value=${value}
+                                    ><div slot="headline">${value}</div></md-select-option
+                                  >`,
+                              )}
+                            </md-outlined-select>`
+                          : html`<md-outlined-text-field
+                              aria-label=${parameter.displayName}
+                              .value=${this.parameterText(parameter.value)}
+                              placeholder=${parameter.key === 'setpoints' ? 'HOME=0, SPEAKER=85' : ''}
+                              @change=${(event: Event) => this.updateParameter(device, parameter.key, this.parseParameterValue(parameter.type, inputValue(event)))}
+                            ></md-outlined-text-field>`
+                    }
+                    <md-filter-chip
+                      label=${t('inspector.ntChipLabel')}
+                      ?selected=${ntEnabled}
+                      aria-label=${ntEnabled ? t('inspector.ntEnabled') : t('inspector.ntDisabled')}
+                      @click=${() => this.toggleParameterNt(device, parameter.key)}
+                    ></md-filter-chip>
+                    ${
+                      catalogParameter?.required === true
+                        ? nothing
+                        : html`<md-icon-button
+                            aria-label=${`${t('tree.delete')} ${parameter.displayName}`}
+                            @click=${() => this.removeOptionalParameter(device, parameter.key)}
+                            ><md-icon>delete</md-icon></md-icon-button
+                          >`
+                    }
+                  </div>
+                  <span class="muted parameter-nt-state">
+                    <md-icon>${ntEnabled ? 'tune' : 'sync_disabled'}</md-icon>
+                    ${ntEnabled ? t('inspector.ntEnabled') : t('inspector.ntDisabled')}
+                  </span>
                 </div>
-                <span class="muted parameter-nt-state">
-                  <md-icon>${ntEnabled ? 'tune' : 'sync_disabled'}</md-icon>
-                  ${ntEnabled ? t('inspector.ntEnabled') : t('inspector.ntDisabled')}
-                </span>
-              </div>
-            `;
+              `,
+            );
           })}
         </div>
         ${
@@ -2401,9 +2477,11 @@ export class AppShell extends LitElement {
               ? nothing
               : html`<p role="status">
                   ${
-                    this.updateCheck.updateAvailable
-                      ? `${t('app.updateAvailable')} v${this.updateCheck.latestVersion ?? ''}`
-                      : t('app.upToDate')
+                    !this.updateCheck.releasePublished
+                      ? t('app.noReleases')
+                      : this.updateCheck.updateAvailable
+                        ? `${t('app.updateAvailable')} v${this.updateCheck.latestVersion ?? ''}`
+                        : t('app.upToDate')
                   }
                 </p>`
           }
@@ -3090,6 +3168,23 @@ export class AppShell extends LitElement {
                   )}
                 `
               : html`
+                  <md-outlined-select
+                    label=${t('presets.parent')}
+                    .value=${this.commonPresetParentId}
+                    @change=${(event: Event) => (this.commonPresetParentId = inputValue(event))}
+                  >
+                    <md-select-option value=""
+                      ><div slot="headline">${t('presets.projectRoot')}</div></md-select-option
+                    >
+                    ${(this.model()?.subsystems ?? []).map(
+                      (subsystem) =>
+                        html`<md-select-option value=${subsystem.id}
+                          ><div slot="headline">
+                            ${this.presetParentLabel(subsystem)}
+                          </div></md-select-option
+                        >`,
+                    )}
+                  </md-outlined-select>
                   <md-outlined-text-field
                     label=${this.#i18n.locale === 'zh-CN' ? '机制名称' : 'Mechanism name'}
                     .value=${this.commonPresetName}
@@ -3097,12 +3192,20 @@ export class AppShell extends LitElement {
                   ></md-outlined-text-field>
                   ${
                     commonUsesCan
-                      ? html`<md-outlined-text-field
-                          label=${t('structured.canId')}
-                          type="number"
-                          .value=${this.commonPresetCanId}
-                          @input=${(event: Event) => (this.commonPresetCanId = inputValue(event))}
-                        ></md-outlined-text-field>`
+                      ? html`<div class="settings-grid">
+                          <md-outlined-text-field
+                            label=${t('structured.canId')}
+                            type="number"
+                            .value=${this.commonPresetCanId}
+                            @input=${(event: Event) => (this.commonPresetCanId = inputValue(event))}
+                          ></md-outlined-text-field>
+                          <md-outlined-text-field
+                            label=${t('presets.canBus')}
+                            .value=${this.commonPresetCanBus}
+                            @input=${(event: Event) =>
+                              (this.commonPresetCanBus = inputValue(event))}
+                          ></md-outlined-text-field>
+                        </div>`
                       : nothing
                   }
                   ${
@@ -3132,11 +3235,21 @@ export class AppShell extends LitElement {
                             .value=${this.commonPresetSetpoints}
                             @input=${(event: Event) => (this.commonPresetSetpoints = inputValue(event))}
                           ></md-outlined-text-field>
-                          <md-outlined-text-field
+                          <md-outlined-select
                             label=${this.#i18n.locale === 'zh-CN' ? '设定值单位' : 'Setpoint unit'}
                             .value=${this.commonPresetUnit}
-                            @input=${(event: Event) => (this.commonPresetUnit = inputValue(event))}
-                          ></md-outlined-text-field>
+                            @change=${(event: Event) => (this.commonPresetUnit = inputValue(event))}
+                          >
+                            ${(this.presetKind === 'frc.velocity-flywheel'
+                              ? ['rps', 'rpm']
+                              : ['rot', 'deg', 'rad']
+                            ).map(
+                              (unit) =>
+                                html`<md-select-option value=${unit}
+                                  ><div slot="headline">${unit}</div></md-select-option
+                                >`,
+                            )}
+                          </md-outlined-select>
                         `
                       : nothing
                   }
@@ -3433,6 +3546,14 @@ export class AppShell extends LitElement {
           ></md-switch>
           <span>${t('settings.compact')}</span>
         </label>
+        <label class="control-row">
+          <md-switch
+            aria-label=${t('workspace.preview')}
+            ?selected=${this.settings.previewChanges}
+            @change=${this.togglePreviewChanges}
+          ></md-switch>
+          <span>${t('workspace.preview')}</span>
+        </label>
         <md-outlined-text-field
           label=${t('settings.editorExecutable')}
           data-settings-field="editorExecutable"
@@ -3707,6 +3828,28 @@ export class AppShell extends LitElement {
           : 'IDLE=0, ACTIVE=1';
   }
 
+  private readonly openPresetDialog = (): void => {
+    const selected = this.selectedSubsystem();
+    this.commonPresetParentId = selected?.id ?? '';
+    this.dialog('preset-dialog')?.show();
+  };
+
+  private presetParentLabel(subsystem: Subsystem): string {
+    const model = this.model();
+    if (model === undefined) return subsystem.displayName;
+    const names = [subsystem.displayName];
+    const visited = new Set<string>([subsystem.id]);
+    let parentId = subsystem.parentId;
+    while (parentId !== undefined && !visited.has(parentId)) {
+      visited.add(parentId);
+      const parent = model.subsystems.find((entry) => entry.id === parentId);
+      if (parent === undefined) break;
+      names.unshift(parent.displayName);
+      parentId = parent.parentId;
+    }
+    return names.join(' / ');
+  }
+
   private readonly createPreset = async (): Promise<void> => {
     const model = this.model();
     if (model === undefined) return;
@@ -3747,7 +3890,7 @@ export class AppShell extends LitElement {
                 transform: tuple6(this.limelightTransform),
               })
             : instantiateCommonPreset(model, this.presetKind as CommonPresetId, {
-                canBus: this.swerveCanBus.trim() || 'rio',
+                canBus: this.commonPresetCanBus.trim() || 'rio',
                 canId: Number(this.commonPresetCanId),
                 channel: Number(this.commonPresetChannel),
                 followerIds:
@@ -3755,6 +3898,9 @@ export class AppShell extends LitElement {
                     ? []
                     : this.commonPresetFollowers.split(',').map((entry) => Number(entry.trim())),
                 name: this.commonPresetName,
+                ...(this.commonPresetParentId.length === 0
+                  ? {}
+                  : { parentId: this.commonPresetParentId }),
                 setpoints: this.commonPresetSetpoints
                   .split(',')
                   .map((entry) => entry.trim())
@@ -4341,6 +4487,15 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     });
   };
 
+  private async removeGoal(subsystem: Subsystem, stateId: string): Promise<void> {
+    const updated = removeSubsystemState(subsystem, stateId);
+    await this.previewCommand({
+      changes: { stateMachine: updated.stateMachine },
+      target: { collection: 'subsystems', id: subsystem.id, scope: 'entity' },
+      type: 'update',
+    });
+  }
+
   private readonly createController = async (): Promise<void> => {
     const name = this.controllerName.trim();
     if (name.length === 0) return;
@@ -4519,6 +4674,18 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     });
   }
 
+  private async removeOptionalParameter(device: Device, key: string): Promise<void> {
+    const definition =
+      device.catalogId === undefined ? undefined : findComponentDefinition(device.catalogId);
+    if (definition?.parameters.find((parameter) => parameter.key === key)?.required === true)
+      return;
+    await this.previewCommand({
+      changes: { parameters: device.parameters.filter((parameter) => parameter.key !== key) },
+      target: { collection: 'devices', id: device.id, scope: 'entity' },
+      type: 'update',
+    });
+  }
+
   private async toggleParameterNt(device: Device, key: string): Promise<void> {
     const parameters = device.parameters.map((parameter) =>
       parameter.key === key
@@ -4595,6 +4762,80 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     });
   }
 
+  private async removeSubsystemReference(
+    subsystem: Subsystem,
+    targetSubsystemId: string,
+  ): Promise<void> {
+    await this.previewCommand({
+      changes: {
+        dependencies: (subsystem.dependencies ?? []).filter(
+          (dependency) => dependency.targetSubsystemId !== targetSubsystemId,
+        ),
+      },
+      target: { collection: 'subsystems', id: subsystem.id, scope: 'entity' },
+      type: 'update',
+    });
+  }
+
+  private async removeCollectionEntity(
+    collection: 'autos' | 'bindings',
+    id: string,
+  ): Promise<void> {
+    await this.previewCommand({ collection, id, type: 'remove' });
+  }
+
+  private async removeControllerEntity(controllerId: string): Promise<void> {
+    const model = this.model();
+    if (model === undefined) return;
+    await this.previewCommand({
+      changes: {
+        bindings: model.bindings.filter((binding) => binding.controllerId !== controllerId),
+        controllers: model.controllers.filter((controller) => controller.id !== controllerId),
+      },
+      target: { scope: 'model' },
+      type: 'update',
+    });
+  }
+
+  private async removeCommand(commandId: string): Promise<void> {
+    const model = this.model();
+    if (model === undefined) return;
+    await this.previewCommand({
+      changes: {
+        autos: model.autos.filter((auto) => auto.commandId !== commandId),
+        bindings: model.bindings.filter((binding) => binding.commandId !== commandId),
+        commands: model.commands
+          .filter((command) => command.id !== commandId)
+          .map((command) => ({
+            ...command,
+            ...(command.childCommandIds === undefined
+              ? {}
+              : {
+                  childCommandIds: command.childCommandIds.filter(
+                    (childId) => childId !== commandId,
+                  ),
+                }),
+          })),
+        subsystems: model.subsystems.map((subsystem) => ({
+          ...subsystem,
+          ...(subsystem.stateMachine === undefined
+            ? {}
+            : {
+                stateMachine: {
+                  ...subsystem.stateMachine,
+                  states: subsystem.stateMachine.states.map((state) => ({
+                    ...state,
+                    actions: state.actions.filter((action) => action.commandId !== commandId),
+                  })),
+                },
+              }),
+        })),
+      },
+      target: { scope: 'model' },
+      type: 'update',
+    });
+  }
+
   private prepareSubsystemReference(subsystem: Subsystem, targetId: string): void {
     const model = this.model();
     const target = model?.subsystems.find((entry) => entry.id === targetId);
@@ -4625,6 +4866,11 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       sourceId: subsystem.id,
       targetId,
     };
+    if (!this.settings.previewChanges) {
+      this.referenceImpact = undefined;
+      void this.addSubsystemReference(subsystem, targetId);
+      return;
+    }
     this.dialog('reference-impact-dialog')?.show();
   }
 
@@ -4918,7 +5164,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
             .map((entry) => this.#i18n.t('tree.impactPreset').replace('{name}', entry.displayName)),
         ],
       };
-      this.dialog('delete-impact-dialog')?.show();
+      this.presentDeleteImpact();
       return;
     }
     if (device === undefined) return;
@@ -4951,8 +5197,16 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       label: device.displayName,
       references,
     };
-    this.dialog('delete-impact-dialog')?.show();
+    this.presentDeleteImpact();
   };
+
+  private presentDeleteImpact(): void {
+    if (this.settings.previewChanges) {
+      this.dialog('delete-impact-dialog')?.show();
+      return;
+    }
+    void this.confirmDeleteSelected();
+  }
 
   private readonly confirmDeleteSelected = async (): Promise<void> => {
     const impact = this.deleteImpact;

@@ -4,10 +4,13 @@ import path from 'node:path';
 import type { AppSettings, RecentProject, WindowState } from '../shared/ipc.js';
 
 export interface PersistedState {
+  readonly settingsVersion: number;
   readonly settings: AppSettings;
   readonly recentProjects: readonly RecentProject[];
   readonly window: WindowState;
 }
+
+const SETTINGS_VERSION = 2;
 
 export const DEFAULT_SETTINGS: AppSettings = {
   autoApplySafeChanges: false,
@@ -19,7 +22,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   language: 'system',
   logLevel: 'info',
-  previewChanges: true,
+  previewChanges: false,
   projectEditors: {},
   projectUi: {},
   theme: 'dark',
@@ -38,6 +41,7 @@ export class SettingsStore {
   readonly #filePath: string;
   #state: PersistedState = {
     recentProjects: [],
+    settingsVersion: SETTINGS_VERSION,
     settings: DEFAULT_SETTINGS,
     window: DEFAULT_WINDOW,
   };
@@ -53,13 +57,19 @@ export class SettingsStore {
   async load(): Promise<PersistedState> {
     try {
       const source = JSON.parse(await readFile(this.#filePath, 'utf8')) as Partial<PersistedState>;
+      const needsDefaultMigration = source.settingsVersion !== SETTINGS_VERSION;
       this.#state = {
         recentProjects: Array.isArray(source.recentProjects)
           ? source.recentProjects.slice(0, 20)
           : [],
-        settings: mergeSettings(source.settings),
+        settingsVersion: SETTINGS_VERSION,
+        settings: mergeSettings({
+          ...source.settings,
+          ...(needsDefaultMigration ? { previewChanges: false } : {}),
+        }),
         window: { ...DEFAULT_WINDOW, ...source.window },
       };
+      if (needsDefaultMigration) await this.#save();
     } catch (error) {
       if (!isNodeError(error) || error.code !== 'ENOENT') {
         const corruptPath = `${this.#filePath}.corrupt-${Date.now()}`;

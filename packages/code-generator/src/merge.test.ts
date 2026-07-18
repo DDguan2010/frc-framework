@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mergeGeneratedDocument, mergeGeneratedJava } from './merge.js';
+import { mergeGeneratedDocument, mergeGeneratedJava, sameJavaTokens } from './merge.js';
 
 describe('generated content merge', () => {
   it('updates managed Java and imports without losing custom methods', () => {
@@ -53,6 +53,21 @@ public final class Example {
   it('accepts an unchanged fully generated preset implementation without managed regions', () => {
     const generated = 'package frc.robot.subsystems.swerve;\nfinal class SwerveConfig {}\n';
     expect(mergeGeneratedJava(generated, generated)).toBe(generated);
+  });
+
+  it('recognizes formatter-only changes in fully generated Java', () => {
+    const generated = `public final class Example extends Base {
+  private final String value = "space stays significant";
+}
+`;
+    const formatted = `public final class Example
+    extends Base {
+        private final String value = "space stays significant";
+    }
+`;
+    expect(sameJavaTokens(formatted, generated)).toBe(true);
+    expect(mergeGeneratedJava(formatted, generated)).toBe(formatted);
+    expect(sameJavaTokens(formatted.replace('Base', 'OtherBase'), generated)).toBe(false);
   });
 
   it('still refuses to overwrite a modified fully generated preset implementation', () => {

@@ -155,10 +155,10 @@ describe('deterministic project generator', () => {
       ),
     );
     expect(digests).toEqual({
-      emptyBase: '51fad53b9d90eeb408969faccbddd8b54a70d5e45b7313802a382c3be628e445',
-      shooter: 'f5507ba5092f1879d2bfc1cb89faae189ea0a24c5ec19747625107f7a4e3865c',
-      singleMotor: '7d1595ccc917aa25bf6db40b066992a537dda766f406dfb59258cecdf4db35ae',
-      swerveLimelight: 'a537b5e06fd4d98f84210009353050cfe2f5c1d63cea2460c45282346bdb5593',
+      emptyBase: '4ce98601280a168a29997a0bfd1fd74dcd821baf789708d3756cf0d5aad980ba',
+      shooter: '79522e9be2e13216020fe09fff2e5ae9993589f52a3799f08d7d079cf899fe0f',
+      singleMotor: '9bd62779e518a8104b831802000bf3e2dc845814f7d3a64368776dafa7c6a18d',
+      swerveLimelight: '64f6406e65e804188d4faa05f7e43c506cf260d8589ba7e8a307d103dbe81e18',
     });
   });
 
@@ -169,7 +169,7 @@ describe('deterministic project generator', () => {
     expect([...first.files.keys()]).toEqual([...second.files.keys()]);
     expect(mapDigest(first.files)).toBe(mapDigest(second.files));
     expect(mapDigest(first.files)).toBe(
-      '51fad53b9d90eeb408969faccbddd8b54a70d5e45b7313802a382c3be628e445',
+      '4ce98601280a168a29997a0bfd1fd74dcd821baf789708d3756cf0d5aad980ba',
     );
     expect(first.files.get('src/main/java/frc/robot/alpha/RobotContainer.java')).toContain(
       'package frc.robot.alpha;',
@@ -283,7 +283,12 @@ describe('deterministic project generator', () => {
     const upper = generated.files.get(
       'src/main/java/frc/robot/alpha/subsystems/shooter/upper/Upper.java',
     );
-    expect(upper).toContain('MotorConfiguration.talonFx("Upper Flywheel", 22)');
+    const upperConfig = generated.files.get(
+      'src/main/java/frc/robot/alpha/subsystems/shooter/upper/UpperConfig.java',
+    );
+    expect(upper).toContain('extends SubsystemBase');
+    expect(upper).toContain('UpperConfig.upperFlywheelConfiguration()');
+    expect(upperConfig).toContain('MotorConfiguration.talonFx("Upper Flywheel", 22)');
     expect(upper).toContain('public enum HoodPositionSetpoint');
     expect(upper).toContain('SPEAKER(85.0);');
     expect(upper).toContain('HOOD_POSITION_SETPOINT_UNIT = "deg"');
@@ -386,7 +391,7 @@ describe('deterministic project generator', () => {
     expect(generated.files.get(pivotPath)).toContain(
       'public IntakePivot(ZeroSensorLogic zeroSensorLogic)',
     );
-    expect(generated.files.get(pivotPath)).toContain(
+    expect(generated.files.get(pivotPath.replace(/\.java$/u, 'Config.java'))).toContain(
       'MotorConfiguration.talonFx("Pivot Motor", 24)',
     );
     expect(generated.files.get(sensorPath)).toContain('SENSOR_ACTIVE');
@@ -868,16 +873,40 @@ describe.runIf(process.env.FRC_FRAMEWORK_RUN_BASE_INTEGRATION === '1')(
 
     it('compiles the common motor, sensor, setpoint, and LED presets', async () => {
       const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-common-presets-'));
-      let configured = instantiateCommonPreset(projectModel(), 'frc.percent-output', {
-        canId: 20,
-        name: 'Intake',
-      });
+      const shooterId = createEntityId();
+      const base = projectModel();
+      let configured = instantiateCommonPreset(
+        {
+          ...base,
+          subsystems: [
+            {
+              displayName: 'Shooter',
+              id: shooterId,
+              kind: 'subsystem',
+              symbol: 'Shooter',
+            },
+          ],
+        },
+        'frc.percent-output',
+        {
+          canId: 20,
+          name: 'Intake',
+        },
+      );
       configured = instantiateCommonPreset(configured, 'frc.velocity-flywheel', {
         canId: 21,
         followerIds: [22],
-        name: 'Shooter',
+        name: 'UpperFlywheel',
+        parentId: shooterId,
         setpointUnit: 'rps',
         setpoints: ['IDLE=0', 'SPEAKER=90'],
+      });
+      configured = instantiateCommonPreset(configured, 'frc.velocity-flywheel', {
+        canId: 25,
+        name: 'LowerFlywheel',
+        parentId: shooterId,
+        setpointUnit: 'rpm',
+        setpoints: ['IDLE=0', 'SPEAKER=5400'],
       });
       configured = instantiateCommonPreset(configured, 'frc.position-mechanism', {
         canId: 23,
@@ -896,12 +925,35 @@ describe.runIf(process.env.FRC_FRAMEWORK_RUN_BASE_INTEGRATION === '1')(
       });
       const result = await createProject({ model: configured, projectRoot: root });
       expect(result.toolchain?.selected?.major).toBe(17);
+      const upperFlywheel = await readFile(
+        path.join(
+          root,
+          'src/main/java/frc/robot/alpha/subsystems/shooter/upperFlywheel/UpperFlywheel.java',
+        ),
+        'utf8',
+      );
+      const lowerFlywheel = await readFile(
+        path.join(
+          root,
+          'src/main/java/frc/robot/alpha/subsystems/shooter/lowerFlywheel/LowerFlywheel.java',
+        ),
+        'utf8',
+      );
+      expect(upperFlywheel).toContain('velocityCommand(this::goalSetpointRps)');
+      expect(upperFlywheel).toContain('public boolean atGoal()');
+      expect(lowerFlywheel).toContain('case SPEAKER -> 90.0;');
       expect(
         await readFile(
           path.join(root, 'src/main/java/frc/robot/alpha/subsystems/indexer/Indexer.java'),
           'utf8',
         ),
-      ).toContain('indexerBeamBreakBroken');
+      ).toContain('!indexerBeamBreakBroken()');
+      expect(
+        await readFile(
+          path.join(root, 'src/main/java/frc/robot/alpha/subsystems/hood/Hood.java'),
+          'utf8',
+        ),
+      ).toContain('zeroAgainstHardStopCommand');
       expect(
         await readFile(
           path.join(root, 'src/main/java/frc/robot/alpha/subsystems/status/Status.java'),

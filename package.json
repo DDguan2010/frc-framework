@@ -35,7 +35,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "pnpm --filter @frc-framework/desktop package && playwright test",
+    "test:dev-smoke": "node scripts/run-dev-smoke.mjs",
     "test:performance": "cross-env FRC_FRAMEWORK_RUN_PERFORMANCE=1 vitest run tests/performance",
+    "test:acceptance-robot": "cross-env FRC_FRAMEWORK_RUN_ACCEPTANCE_ROBOT=1 vitest run tests/acceptance",
     "test:smoke": "node scripts/run-packaged-smoke.mjs",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm licenses:check",
     "release:version": "node scripts/set-release-version.mjs"
