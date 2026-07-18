@@ -867,14 +867,20 @@ export class AppShell extends LitElement {
       void this.refreshToolchainInfo();
     });
     this.#removeFilesChangedListener = window.framework.project.onFilesChanged((events) => {
-      const external = events.filter((event) => event.external);
-      if (external.length === 0) return;
       const byPath = new Map(this.externalChanges.map((event) => [event.path, event]));
-      for (const event of external) byPath.set(event.path, event);
+      for (const event of events) {
+        if (event.external) byPath.set(event.path, event);
+        else byPath.delete(event.path);
+      }
       this.externalChanges = [...byPath.values()].sort((left, right) =>
         left.path.localeCompare(right.path),
       );
       if (this.#sourceSyncTimer !== undefined) clearTimeout(this.#sourceSyncTimer);
+      if (this.externalChanges.length === 0) {
+        this.#sourceSyncTimer = undefined;
+        this.dialog('external-change-dialog')?.close();
+        return;
+      }
       this.#sourceSyncTimer = setTimeout(() => void this.synchronizeExternalSource(), 120);
     });
     void this.initialize();
