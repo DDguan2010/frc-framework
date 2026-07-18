@@ -7,6 +7,7 @@ interface ConfiguredMaker {
   readonly config: {
     readonly options?: {
       readonly bin?: string;
+      readonly license?: string;
       readonly name?: string;
       readonly productName?: string;
     };
@@ -27,11 +28,14 @@ describe('Electron Forge configuration', () => {
     expect(makers).toHaveLength(2);
     for (const maker of makers) {
       await maker.prepareConfig('x64');
-      expect(maker.config.options).toEqual({
+      expect(maker.config.options).toMatchObject({
         bin: 'frc-framework',
         name: 'frc-framework',
         productName: 'FRC Framework',
       });
+      if (maker.name === 'rpm') {
+        expect(maker.config.options?.license).toBe('Proprietary');
+      }
     }
   });
 });

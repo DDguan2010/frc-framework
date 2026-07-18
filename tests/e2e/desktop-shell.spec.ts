@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,8 +13,11 @@ test('production shell is secure, accessible, and interactive', async () => {
   const require = createRequire(import.meta.url);
   const electronExecutable = require('electron') as string;
   const userData = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-e2e-'));
-  const projectRoot = path.join(userData, 'project');
-  await mkdir(projectRoot);
+  const selectedProjectRoot = path.join(userData, 'project');
+  await mkdir(selectedProjectRoot);
+  // ProjectService returns a canonical path. This resolves Windows 8.3 aliases
+  // (RUNNER~1) and macOS /var -> /private/var before asserting persisted state.
+  const projectRoot = await realpath(selectedProjectRoot);
   const application = await electron.launch({
     args: [
       path.resolve('apps/desktop'),
@@ -353,6 +356,9 @@ test('production shell is secure, accessible, and interactive', async () => {
     await clickMaterialButton(page, page.locator('#subsystem-dialog md-filled-button'));
     await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeVisible();
     await page.getByRole('button', { name: i18n.t('diff.apply') }).click();
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeHidden({
+      timeout: 60_000,
+    });
     await expect(page.getByRole('button', { name: 'Intake direct' })).toBeVisible();
 
     await clickMaterialButton(
@@ -374,10 +380,15 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect(presetDialog).toBeHidden();
     await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeVisible();
     await page.getByRole('button', { name: i18n.t('diff.apply') }).click();
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeHidden({
+      timeout: 60_000,
+    });
     const rollerSubsystem = page.getByRole('treeitem', { name: 'Roller subsystem' });
-    await expect(rollerSubsystem).toBeVisible();
-    await rollerSubsystem.click();
-    await page.getByRole('treeitem', { name: 'Roller Motor motor' }).click();
+    await expect(rollerSubsystem).toBeVisible({ timeout: 15_000 });
+    const rollerMotor = page.getByRole('treeitem', { name: 'Roller Motor motor' });
+    if (!(await rollerMotor.isVisible())) await rollerSubsystem.click();
+    await expect(rollerMotor).toBeVisible();
+    await rollerMotor.click();
     const firstNtChip = page.locator('.parameter-row md-filter-chip').first();
     await expect(firstNtChip).toBeVisible();
     expect(
@@ -386,12 +397,21 @@ test('production shell is secure, accessible, and interactive', async () => {
       ),
     ).toBe(true);
     await clickMaterialButton(page, firstNtChip);
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeVisible();
     await page.getByRole('button', { name: i18n.t('diff.apply') }).click();
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeHidden({
+      timeout: 60_000,
+    });
+    // Applying regenerates source files and may briefly rebuild the tree from a
+    // file-watcher event. Reselect the same stable entity before checking that
+    // the Inspector reflects the persisted NetworkTables setting.
+    await expect(rollerMotor).toBeVisible();
+    await rollerMotor.click();
+    await expect(firstNtChip).toBeVisible();
     expect(
-      await page
-        .locator('.parameter-row md-filter-chip')
-        .first()
-        .evaluate((element) => (element as HTMLElement & { selected: boolean }).selected),
+      await firstNtChip.evaluate(
+        (element) => (element as HTMLElement & { selected: boolean }).selected,
+      ),
     ).toBe(false);
 
     await clickMaterialButton(

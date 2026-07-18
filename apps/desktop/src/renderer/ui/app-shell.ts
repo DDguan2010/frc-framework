@@ -4515,7 +4515,9 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
             ...parameter,
             networkTables: {
               ...parameter.networkTables,
-              enabled: parameter.networkTables?.enabled !== true,
+              // An omitted binding is enabled by default in the Inspector, so
+              // the first click must explicitly disable it.
+              enabled: parameter.networkTables?.enabled === false,
               writable: parameter.networkTables?.writable ?? true,
             },
           }

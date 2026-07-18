@@ -74,6 +74,7 @@ const config: ForgeConfig = {
     new MakerRpm({
       options: {
         bin: 'frc-framework',
+        license: 'Proprietary',
         name: 'frc-framework',
         productName: 'FRC Framework',
       },
