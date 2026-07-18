@@ -744,3 +744,4 @@
 - [x] **CONT-111 P0** 新增完整验收机器人：Swerve、Limelight、Intake Roller/Pivot、Shooter 双飞轮/Hood/Feeder、LED、NT、双手柄、Bindings、跨系统 Commands、PathPlanner Named Commands、Auto、Telemetry 与 Docs；真实 WPILib Gradle 格式化、编译、测试及 Java 重新索引通过。
 - [x] **CONT-112 P1** 新增 `docs/GENERATED_PROJECT_ARCHITECTURE.md` 和 `pnpm test:acceptance-robot`，明确 Config/Subsystem/RobotCommands/RobotContainer 的代码放置边界并形成可重复验收闭环。
 - [x] **CONT-113 P0** Swerve 与受支持的 Driver Controller 同时存在时自动生成带 deadband/scale/axis inversion 的 field-relative Default Command；Xbox、PS4、PS5、Joystick 与 Generic HID 均有明确轴映射，完整验收项目已编译验证。
+- [x] **CONT-114 P0** 修复 Bash、PowerShell 与 pnpm 间的发布版本参数转发差异，增加解析回归测试，并将 GitHub Actions 升级到基于 Node 24 的当前主版本。

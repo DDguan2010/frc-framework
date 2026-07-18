@@ -26,16 +26,16 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
           run_install: false
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24.15.0
           cache: pnpm
@@ -47,7 +47,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
-        run: pnpm release:version -- "$RELEASE_VERSION"
+        run: pnpm release:version "$RELEASE_VERSION"
 
       - name: Install Linux packaging dependencies
         if: runner.os == 'Linux'
@@ -63,7 +63,7 @@ jobs:
         run: pnpm release:metadata
 
       - name: Upload platform output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: release-${{ runner.os }}-${{ runner.arch }}
@@ -77,10 +77,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download every platform artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: release-files
