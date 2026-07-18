@@ -574,7 +574,7 @@
 - [x] **M10-007 P0** Electron typed IPC 权限和路径穿越测试。
 - [x] **M10-008 P0** Create/Open/Edit/Diff/Build 的 Playwright E2E。
 - [x] **M10-009 P0** 中英文 UI 截图和布局回归。
-- [!] **M10-010 P0** Windows/macOS/Linux packaged smoke test（Windows 已通过；macOS/Linux 已配置 CI，需对应 runner 执行）。
+- [x] **M10-010 P0** Windows/macOS/Linux packaged smoke test（GitHub Actions 三平台 runner 已验证）。
 - [x] **M10-011 P1** 可访问性自动扫描和人工键盘验收。
 
 ### 12.2 性能目标
@@ -596,8 +596,8 @@
 ### 12.3 打包与发布
 
 - [x] **M10-040 P0** Windows installer 和 portable/zip artifact。
-- [!] **M10-041 P0** macOS DMG/zip artifact（Maker 与 CI 已配置，需 macOS runner 生成）。
-- [!] **M10-042 P0** Linux deb/rpm 和 zip artifact（Maker 与 CI 已配置，需 Linux runner 生成）。
+- [x] **M10-041 P0** macOS DMG/zip artifact（GitHub Actions macOS runner 已验证）。
+- [x] **M10-042 P0** Linux deb/rpm 和 zip artifact（GitHub Actions Linux runner 已验证）。
 - [x] **M10-043 P0** 每个平台生成 SHA-256 校验值和 SBOM/许可文件。
 - [x] **M10-044 P0** 版本号、release notes、Schema/Base/Preset 版本写入 About。
 - [x] **M10-045 P0** 迁移前自动备份并测试降级提示。
@@ -707,7 +707,7 @@
 
 - [x] M6–M8 的全部 P0 完成。
 - [x] Swerve、Limelight、Controls 和 NT 写回通过真实 fixture。
-- [!] macOS/Linux packaged smoke test 需对应 CI runner 执行。
+- [x] Windows、macOS、Linux packaged smoke test 均已通过对应 CI runner。
 
 ### Beta Gate
 

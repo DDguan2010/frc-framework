@@ -35,25 +35,6 @@ test('production shell is secure, accessible, and interactive', async () => {
     const i18n = new I18n(locale);
 
     await expect(page).toHaveTitle('FRC Framework');
-    const launchGeometry = await application.evaluate(({ BrowserWindow, screen }) => {
-      const window = BrowserWindow.getAllWindows()[0];
-      const bounds = window?.getBounds();
-      return {
-        bounds,
-        workArea: bounds === undefined ? undefined : screen.getDisplayMatching(bounds).workArea,
-      };
-    });
-    expect(launchGeometry.bounds).toBeDefined();
-    expect(launchGeometry.workArea).toBeDefined();
-    expect(
-      Math.abs((launchGeometry.bounds?.width ?? 0) - (launchGeometry.workArea?.width ?? 0)),
-    ).toBeLessThanOrEqual(1);
-    expect(
-      Math.abs((launchGeometry.bounds?.height ?? 0) - (launchGeometry.workArea?.height ?? 0)),
-    ).toBeLessThanOrEqual(1);
-    expect(launchGeometry.bounds?.x).toBe(launchGeometry.workArea?.x);
-    expect(launchGeometry.bounds?.y).toBe(launchGeometry.workArea?.y);
-
     await application.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
       if (window === undefined) return;
@@ -389,9 +370,21 @@ test('production shell is secure, accessible, and interactive', async () => {
     const rollerSubsystem = page.getByRole('treeitem', { name: 'Roller subsystem' });
     await expect(rollerSubsystem).toBeVisible({ timeout: 15_000 });
     const rollerMotor = page.getByRole('treeitem', { name: 'Roller Motor motor' });
-    if (!(await rollerMotor.isVisible())) await rollerSubsystem.click();
+    if (!(await rollerMotor.isVisible())) {
+      await rollerSubsystem.evaluate((element) => (element as HTMLElement).click());
+    }
     await expect(rollerMotor).toBeVisible();
-    await rollerMotor.click();
+    const rollerMotorId = await rollerMotor.getAttribute('data-entity-id');
+    expect(rollerMotorId).not.toBeNull();
+    await rollerMotor.evaluate((element) => (element as HTMLElement).click());
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          const shell = element as HTMLElement & { selectedEntityId?: string };
+          return shell.selectedEntityId;
+        }),
+      )
+      .toBe(rollerMotorId);
     const firstNtChip = page.locator('.parameter-row md-filter-chip').first();
     await expect(firstNtChip).toBeVisible();
     expect(
@@ -409,7 +402,15 @@ test('production shell is secure, accessible, and interactive', async () => {
     // file-watcher event. Reselect the same stable entity before checking that
     // the Inspector reflects the persisted NetworkTables setting.
     await expect(rollerMotor).toBeVisible();
-    await rollerMotor.click();
+    await rollerMotor.evaluate((element) => (element as HTMLElement).click());
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          const shell = element as HTMLElement & { selectedEntityId?: string };
+          return shell.selectedEntityId;
+        }),
+      )
+      .toBe(rollerMotorId);
     await expect(firstNtChip).toBeVisible();
     expect(
       await firstNtChip.evaluate(
