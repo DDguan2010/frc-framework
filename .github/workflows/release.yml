@@ -79,6 +79,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.15.0
+
       - name: Download every platform artifact
         uses: actions/download-artifact@v8
         with:
@@ -87,22 +92,7 @@ jobs:
           merge-multiple: true
 
       - name: Collect release assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p publish
-          find release-files/apps/desktop/out/make -type f \
-            \( -name '*.exe' -o -name '*.nupkg' -o -name 'RELEASES' -o -name '*.zip' \
-               -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \) \
-            -exec cp '{}' publish/ \;
-          for directory in release-files/output/release/*; do
-            [ -d "$directory" ] || continue
-            platform="$(basename "$directory")"
-            for metadata in "$directory"/*; do
-              cp "$metadata" "publish/${platform}-$(basename "$metadata")"
-            done
-          done
-          test -n "$(find publish -type f -print -quit)"
+        run: node scripts/collect-release-assets.mjs release-files publish
 
       - name: Create release and tag
         env:

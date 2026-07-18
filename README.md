@@ -67,7 +67,8 @@ pnpm make        # 为当前系统生成安装包
 
 仓库管理员可打开 GitHub 的 **Actions → Build and publish release → Run workflow**，只需填写版本号，
 例如 `0.2.0`。工作流会在 Windows、macOS、Linux 上验证并构建安装包，生成 SHA-256、SPDX
-SBOM 和依赖许可清单，随后创建 `v0.2.0` Tag 与 GitHub Release。
+SBOM 和依赖许可清单，随后创建 `v0.2.0` Tag 与 GitHub Release。公开 Release 只提供 Windows
+EXE、macOS DMG、Linux DEB/RPM 安装包；便携包和审计文件保留在 Actions 构建产物中。
 
 在首次运行发布工作流前，仓库的 `/releases/latest` 会返回 404；应用会将其显示为“尚无发布版本”，而不是更新检查失败。
 

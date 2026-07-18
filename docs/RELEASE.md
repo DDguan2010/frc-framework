@@ -7,9 +7,11 @@ must run on their target host.
 
 Open **Actions → Build and publish release → Run workflow**, enter a version such as `0.2.0`, and
 run it from the branch to publish. The workflow validates the version, updates both package files for
-the build, runs the complete check suite, builds each platform on its native runner, uploads the
-installers and metadata, and creates the `v<version>` GitHub Release. Do not include the leading `v`
-in the input.
+the build, runs the complete check suite, builds each platform on its native runner, and creates the
+`v<version>` GitHub Release. The public Release contains only the Windows Setup EXE, macOS DMG, Linux
+DEB, and Linux RPM installers. Portable archives, checksums, SBOMs, dependency licenses, and maker
+intermediate files remain available in the workflow's Actions artifacts without cluttering the
+public download list. Do not include the leading `v` in the input.
 
 The workflow itself is the release authority; a normal local `git commit` intentionally has no
 project hook and does not run checks. CI and the release workflow remain responsible for validation.
@@ -24,7 +26,8 @@ pnpm release:metadata
 
 Windows produces a Squirrel installer and ZIP, macOS produces DMG and ZIP, and Linux produces DEB,
 RPM, and ZIP. `output/release/<platform>-<architecture>` contains `SHA256SUMS`, an SPDX 2.3 SBOM,
-and the production dependency license inventory.
+and the production dependency license inventory. These complete outputs are retained as Actions
+artifacts; only native installers are copied to the GitHub Release.
 
 ## Signing secrets
 

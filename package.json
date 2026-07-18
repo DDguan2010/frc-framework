@@ -33,7 +33,7 @@
     "licenses:check": "node scripts/check-licenses.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
-    "test:release": "node --test scripts/release-version.test.mjs",
+    "test:release": "node --test scripts/release-version.test.mjs scripts/collect-release-assets.test.mjs",
     "test:watch": "vitest",
     "test:e2e": "pnpm --filter @frc-framework/desktop package && playwright test",
     "test:dev-smoke": "node scripts/run-dev-smoke.mjs",

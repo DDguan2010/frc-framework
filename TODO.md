@@ -745,3 +745,4 @@
 - [x] **CONT-112 P1** 新增 `docs/GENERATED_PROJECT_ARCHITECTURE.md` 和 `pnpm test:acceptance-robot`，明确 Config/Subsystem/RobotCommands/RobotContainer 的代码放置边界并形成可重复验收闭环。
 - [x] **CONT-113 P0** Swerve 与受支持的 Driver Controller 同时存在时自动生成带 deadband/scale/axis inversion 的 field-relative Default Command；Xbox、PS4、PS5、Joystick 与 Generic HID 均有明确轴映射，完整验收项目已编译验证。
 - [x] **CONT-114 P0** 修复 Bash、PowerShell 与 pnpm 间的发布版本参数转发差异，增加解析回归测试，并将 GitHub Actions 升级到基于 Node 24 的当前主版本。
+- [x] **CONT-115 P0** GitHub Release 只公开 Windows EXE、macOS DMG、Linux DEB/RPM 四个原生安装包；便携包、Squirrel 中间文件和审计元数据仅保留为 Actions 构建产物，并通过白名单回归测试防止发布页再次混入内部文件。
