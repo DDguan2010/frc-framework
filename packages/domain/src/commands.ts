@@ -1,3 +1,4 @@
+import { planSubsystemRemoval } from './deletion.js';
 import type { CollectionEntity, EntityCollection, EntityId, FrcProjectModel } from './model.js';
 
 export type DomainCommand =
@@ -90,6 +91,39 @@ function addEntity(model: FrcProjectModel, command: AddEntityCommand): CommandRe
 }
 
 function removeEntity(model: FrcProjectModel, command: RemoveEntityCommand): CommandResult {
+  if (command.collection === 'subsystems') {
+    const plan = planSubsystemRemoval(model, command.id);
+    return {
+      inverse: {
+        changes: {
+          autos: model.autos,
+          bindings: model.bindings,
+          commands: model.commands,
+          devices: model.devices,
+          presets: model.presets,
+          subsystems: model.subsystems,
+        },
+        target: { scope: 'model' },
+        type: 'update',
+      },
+      model: plan.model,
+      outputFiles: [
+        'project.yaml',
+        'src/main/java/{package}/RobotContainer.java',
+        'src/main/java/{package}/commands/**',
+        'src/main/java/{package}/subsystems/**',
+        'docs/**',
+      ],
+      touchedEntityIds: [
+        ...plan.removedSubsystemIds,
+        ...plan.removedDeviceIds,
+        ...plan.removedCommandIds,
+        ...plan.removedBindingIds,
+        ...plan.removedAutoIds,
+        ...plan.removedPresetIds,
+      ],
+    };
+  }
   const collection = mutableCollection(model, command.collection);
   const index = collection.findIndex((entity) => entity.id === command.id);
   if (index < 0) {

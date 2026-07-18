@@ -1,0 +1,30 @@
+package lib.ironpulse.io;
+
+import edu.wpi.first.wpilibj.AnalogInput;
+
+/** Analog beam break that compares its voltage with a configurable threshold. */
+public final class BeamBreakIOAnalog implements BeamBreakIO, AutoCloseable {
+    private final AnalogInput input;
+    private final double thresholdVolts;
+    private final boolean activeBelowThreshold;
+
+    public BeamBreakIOAnalog(int channel, double thresholdVolts, boolean activeBelowThreshold) {
+        input = new AnalogInput(channel);
+        this.thresholdVolts = thresholdVolts;
+        this.activeBelowThreshold = activeBelowThreshold;
+    }
+
+    @Override
+    public void updateInputs(BeamBreakIOInputs inputs) {
+        double voltage = input.getVoltage();
+        boolean below = voltage < thresholdVolts;
+        inputs.rawState = activeBelowThreshold ? below : !below;
+        inputs.value = voltage;
+        inputs.connected = true;
+    }
+
+    @Override
+    public void close() {
+        input.close();
+    }
+}

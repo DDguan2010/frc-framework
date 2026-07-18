@@ -1,0 +1,22 @@
+# IronPulse compatibility layer
+
+This generated project includes a compact, dependency-light IronPulse-style support layer under
+`lib.ironpulse`. It is ordinary Java source owned by the robot project and remains usable without
+FRC Framework.
+
+Included building blocks:
+
+- real and simulated TalonFX motor IO, configuration, motion commands, zeroing, and SysId;
+- digital, analog, and simulated beam-break IO with logging, debounce, triggers, and wait commands;
+- fixed-duration and condition-driven controller rumble commands;
+- reusable edge and time-delay boolean utilities.
+
+Preset-specific Swerve and Limelight sources are added only when those presets are selected, so an
+empty project stays small and understandable.
+
+## Acknowledgement
+
+The package organization and several API concepts were informed by the library maintained by FRC
+Team 6941, IronPulse Robotics (`ironpulse6941`). Thank you to the team for sharing its FRC software
+architecture and engineering ideas. FRC Framework's compatibility sources are independently
+implemented for this Base; the upstream repository is not bundled wholesale.

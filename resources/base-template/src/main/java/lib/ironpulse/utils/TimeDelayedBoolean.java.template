@@ -1,0 +1,37 @@
+package lib.ironpulse.utils;
+
+import edu.wpi.first.wpilibj.Timer;
+
+/** Becomes true only after an input remains true continuously for the configured delay. */
+public final class TimeDelayedBoolean {
+    private double delaySeconds;
+    private double risingTimestamp = Double.NaN;
+
+    public TimeDelayedBoolean(double delaySeconds) {
+        setDelaySeconds(delaySeconds);
+    }
+
+    public boolean update(boolean value) {
+        if (!value) {
+            reset();
+            return false;
+        }
+        if (Double.isNaN(risingTimestamp)) {
+            risingTimestamp = Timer.getFPGATimestamp();
+        }
+        return Timer.getFPGATimestamp() - risingTimestamp >= delaySeconds;
+    }
+
+    public boolean update(boolean value, double delaySeconds) {
+        setDelaySeconds(delaySeconds);
+        return update(value);
+    }
+
+    public void setDelaySeconds(double delaySeconds) {
+        this.delaySeconds = Math.max(0.0, delaySeconds);
+    }
+
+    public void reset() {
+        risingTimestamp = Double.NaN;
+    }
+}

@@ -154,6 +154,13 @@ describe('domain model', () => {
     expect(plan.model.subsystems[0]?.dependencies).toEqual([]);
     expect(plan.model.subsystems[0]?.stateMachine?.states[0]?.actions).toEqual([]);
     expect(validateModel(plan.model).filter((problem) => problem.severity === 'error')).toEqual([]);
+
+    const session = new DomainSession(model);
+    const removed = session.execute({ collection: 'subsystems', id: rootId, type: 'remove' });
+    expect(removed.model).toEqual(plan.model);
+    expect(removed.touchedEntityIds).toEqual(expect.arrayContaining([rootId, childId, deviceId]));
+    session.undo();
+    expect(session.model).toEqual(model);
   });
 
   it('reports duplicate CAN addresses and broken references with entity paths', () => {

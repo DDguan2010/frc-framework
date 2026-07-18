@@ -1,0 +1,27 @@
+package lib.ironpulse.io;
+
+import edu.wpi.first.wpilibj.DigitalInput;
+
+/** Digital-input beam break with configurable electrical polarity. */
+public final class BeamBreakIODigital implements BeamBreakIO, AutoCloseable {
+    private final DigitalInput input;
+    private final boolean activeLow;
+
+    public BeamBreakIODigital(int channel, boolean activeLow) {
+        input = new DigitalInput(channel);
+        this.activeLow = activeLow;
+    }
+
+    @Override
+    public void updateInputs(BeamBreakIOInputs inputs) {
+        boolean raw = input.get();
+        inputs.rawState = activeLow ? !raw : raw;
+        inputs.value = raw ? 1.0 : 0.0;
+        inputs.connected = true;
+    }
+
+    @Override
+    public void close() {
+        input.close();
+    }
+}

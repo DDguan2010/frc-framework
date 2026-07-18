@@ -1,0 +1,39 @@
+package lib.ironpulse.command;
+
+import edu.wpi.first.wpilibj.GenericHID;
+import edu.wpi.first.wpilibj2.command.Command;
+import java.util.function.BooleanSupplier;
+
+/** Mirrors a boolean condition to one or more controller rumble motors while scheduled. */
+public final class RumbleWhenCommand extends Command {
+    private final GenericHID[] controllers;
+    private final BooleanSupplier condition;
+    private final double strength;
+
+    public RumbleWhenCommand(BooleanSupplier condition, GenericHID... controllers) {
+        this(condition, 1.0, controllers);
+    }
+
+    public RumbleWhenCommand(
+            BooleanSupplier condition, double strength, GenericHID... controllers) {
+        this.condition = condition;
+        this.strength = Math.max(0.0, Math.min(1.0, strength));
+        this.controllers = controllers.clone();
+    }
+
+    @Override
+    public void execute() {
+        setRumble(condition.getAsBoolean() ? strength : 0.0);
+    }
+
+    @Override
+    public void end(boolean interrupted) {
+        setRumble(0.0);
+    }
+
+    private void setRumble(double value) {
+        for (GenericHID controller : controllers) {
+            controller.setRumble(GenericHID.RumbleType.kBothRumble, value);
+        }
+    }
+}

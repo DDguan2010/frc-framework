@@ -1,0 +1,36 @@
+package lib.ironpulse.utils;
+
+/** Detects a selected transition without requiring callers to retain the previous value. */
+public final class EdgedBoolean {
+    public enum Edge {
+        RISING,
+        FALLING,
+        EITHER
+    }
+
+    private Edge edge;
+    private boolean previous;
+
+    public EdgedBoolean(Edge edge) {
+        this.edge = edge;
+    }
+
+    public boolean update(boolean current) {
+        boolean rising = !previous && current;
+        boolean falling = previous && !current;
+        previous = current;
+        return switch (edge) {
+            case RISING -> rising;
+            case FALLING -> falling;
+            case EITHER -> rising || falling;
+        };
+    }
+
+    public void setEdge(Edge edge) {
+        this.edge = edge;
+    }
+
+    public void reset(boolean current) {
+        previous = current;
+    }
+}

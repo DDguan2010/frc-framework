@@ -662,6 +662,9 @@
 - [x] **CONT-087 P0** 移除 commit hooks，普通 Git 提交不隐式运行项目检查。
 - [x] **CONT-088 P0** 允许未修改的全文件预制 Java 参与后续结构化操作，同时保留真实外部修改冲突保护。
 - [x] **CONT-089 P0** Subsystem 删除支持层级、设备、Command、Binding、Auto 与生成文件的影响预览和级联清理。
+- [x] **CONT-090 P0** Java 扫描覆盖层按稳定实体 ID 去重，Subsystem 删除只在后端权威模型上执行级联，避免 Swerve Mechanism 删除产生重复 Command ID。
+- [x] **CONT-091 P0** 存在未处理 Diff 时阻止下一次结构化修改，并以中英文提示先应用或放弃上一次修改。
+- [x] **CONT-092 P1** 扩充独立实现的 IronPulse 兼容 Base（Beam Break、Rumble、布尔工具），并在 About、README 与第三方说明中鸣谢 IronPulse 6941。
 
 ## 14. 首批开发迭代建议
 

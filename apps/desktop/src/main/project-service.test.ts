@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { generateStructuredFiles } from '@frc-framework/code-generator';
-import { createEmptyProject, createEntityId, planSubsystemRemoval } from '@frc-framework/domain';
+import { createEmptyProject, createEntityId } from '@frc-framework/domain';
 import { instantiateCommonPreset, instantiateSwervePreset } from '@frc-framework/presets';
 import { stringifyProjectYaml } from '@frc-framework/project-io';
 import { describe, expect, it } from 'vitest';
@@ -41,6 +41,35 @@ describe('ProjectService structured edits', () => {
     const service = new ProjectService(store, path.resolve('resources/base-template'));
     try {
       await service.open(root);
+      const swerveRoot = swerve.subsystems.find(
+        (subsystem) => subsystem.kind === 'subsystem' && subsystem.parentId === undefined,
+      );
+      if (swerveRoot === undefined) throw new Error('Expected the Swerve root subsystem.');
+      const mechanismId = createEntityId();
+      const mechanism = await service.previewCommand({
+        collection: 'subsystems',
+        entity: {
+          displayName: 'Odometry Helper',
+          id: mechanismId,
+          kind: 'mechanism',
+          parentId: swerveRoot.id,
+          symbol: 'OdometryHelper',
+        },
+        type: 'add',
+      });
+      expect(mechanism.problems).toEqual([]);
+      await service.applyPreview(mechanism.id);
+      const mechanismRemoval = await service.previewCommand({
+        collection: 'subsystems',
+        id: mechanismId,
+        type: 'remove',
+      });
+      expect(mechanismRemoval.problems).toEqual([]);
+      const afterMechanismRemoval = await service.applyPreview(mechanismRemoval.id);
+      const swerveCommandIds =
+        afterMechanismRemoval.model?.commands.map((command) => command.id) ?? [];
+      expect(new Set(swerveCommandIds).size).toBe(swerveCommandIds.length);
+
       const position = instantiateCommonPreset(swerve, 'frc.position-mechanism', {
         canBus: 'rio',
         canId: 20,
@@ -59,7 +88,20 @@ describe('ProjectService structured edits', () => {
       });
       expect(preview.problems).toEqual([]);
       expect(preview.changes.some((change) => change.path.endsWith('/Arm.java'))).toBe(true);
-      await service.discardPreview(preview.id);
+      const added = await service.applyPreview(preview.id);
+      const arm = added.model?.subsystems.find((subsystem) => subsystem.displayName === 'Arm');
+      if (arm === undefined) throw new Error('Expected the position preset subsystem.');
+
+      const removal = await service.previewCommand({
+        collection: 'subsystems',
+        id: arm.id,
+        type: 'remove',
+      });
+      expect(removal.problems).toEqual([]);
+      const removed = await service.applyPreview(removal.id);
+      expect(removed.model?.subsystems.some((subsystem) => subsystem.id === arm.id)).toBe(false);
+      const commandIds = removed.model?.commands.map((command) => command.id) ?? [];
+      expect(new Set(commandIds).size).toBe(commandIds.length);
     } finally {
       await service.close();
     }
@@ -88,18 +130,10 @@ describe('ProjectService structured edits', () => {
     const service = new ProjectService(store, path.resolve('resources/base-template'));
     try {
       await service.open(root);
-      const plan = planSubsystemRemoval(model, subsystemId);
       const preview = await service.previewCommand({
-        changes: {
-          autos: plan.model.autos,
-          bindings: plan.model.bindings,
-          commands: plan.model.commands,
-          devices: plan.model.devices,
-          presets: plan.model.presets,
-          subsystems: plan.model.subsystems,
-        },
-        target: { scope: 'model' },
-        type: 'update',
+        collection: 'subsystems',
+        id: subsystemId,
+        type: 'remove',
       });
       expect(preview.changes).toContainEqual(
         expect.objectContaining({ kind: 'deleted', path: javaPath }),
@@ -309,6 +343,49 @@ describe('ProjectService structured edits', () => {
       const refreshed = await service.refresh();
       expect(refreshed.model?.commands.some((command) => command.symbol === 'shoot')).toBe(false);
       expect(await readFile(path.join(root, 'project.yaml'), 'utf8')).toBe(yaml);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('deduplicates Java overlay commands by stable entity ID after a display-name edit', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-source-id-overlay-'));
+    const model = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'Source ID Overlay',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    await writeFile(path.join(root, 'project.yaml'), stringifyProjectYaml(model), 'utf8');
+    const commandsDirectory = path.join(root, 'src/main/java/frc/robot/commands');
+    await mkdir(commandsDirectory, { recursive: true });
+    await writeFile(
+      path.join(commandsDirectory, 'TeamCommands.java'),
+      `package frc.robot.commands;
+       import edu.wpi.first.wpilibj2.command.Command;
+       public final class TeamCommands { public static Command shoot() { return null; } }
+      `,
+      'utf8',
+    );
+    const store = new SettingsStore(path.join(root, '.settings.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      const opened = await service.open(root);
+      const inferredShoot = opened.model?.commands.find((command) => command.symbol === 'shoot');
+      if (inferredShoot === undefined) throw new Error('Expected inferred shoot command.');
+      const structured = {
+        ...model,
+        commands: [{ ...inferredShoot, displayName: 'Team renamed shoot command' }],
+      };
+      await writeFile(path.join(root, 'project.yaml'), stringifyProjectYaml(structured), 'utf8');
+      const reopened = await service.open(root);
+      expect(
+        reopened.model?.commands.filter((command) => command.id === inferredShoot.id),
+      ).toHaveLength(1);
+      expect(
+        reopened.model?.commands.find((command) => command.id === inferredShoot.id)?.displayName,
+      ).toBe('Team renamed shoot command');
     } finally {
       await service.close();
     }

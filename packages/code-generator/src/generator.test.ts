@@ -155,10 +155,10 @@ describe('deterministic project generator', () => {
       ),
     );
     expect(digests).toEqual({
-      emptyBase: 'b1acc994bb9a7e4afa55bf6974a430ed1a77c40b7c739f8b8dae241b5a1a2596',
-      shooter: '15b985281302f4cf6d2ffe95ae238f85b59b1b2c0aff4ed909cbdee0e73de7ca',
-      singleMotor: '94b771f5bbae7ee2eee28491c9f5b3a70bafd889d9d6f2c1bd781c1fb1a11e5d',
-      swerveLimelight: '8714b58087fb2c2eb2474e411b619e5b27b1052860038586754f1619d68622aa',
+      emptyBase: '3fc9a3871482426b10ca9df89bb0abf2126c09fc75598ca9e334584b3f7b9587',
+      shooter: '2c2bacc1e17579fca7ad5905f6c6a731ace728d5031f2cd2cd8d60b638e564f7',
+      singleMotor: 'd0ad4c5fc5190e08a9049609be2424f9c3b5aa959f09933919c62f5d67681972',
+      swerveLimelight: '91e15ba71bae8eaf4dff487f35ad88129f6a2dd4dba74594f46b26f94128dbca',
     });
   });
 
@@ -169,7 +169,7 @@ describe('deterministic project generator', () => {
     expect([...first.files.keys()]).toEqual([...second.files.keys()]);
     expect(mapDigest(first.files)).toBe(mapDigest(second.files));
     expect(mapDigest(first.files)).toBe(
-      'b1acc994bb9a7e4afa55bf6974a430ed1a77c40b7c739f8b8dae241b5a1a2596',
+      '3fc9a3871482426b10ca9df89bb0abf2126c09fc75598ca9e334584b3f7b9587',
     );
     expect(first.files.get('src/main/java/frc/robot/alpha/RobotContainer.java')).toContain(
       'package frc.robot.alpha;',
@@ -180,6 +180,9 @@ describe('deterministic project generator', () => {
     expect(first.files.has('src/main/java/lib/ironpulse/limelight/LimelightSubsystem.java')).toBe(
       false,
     );
+    expect(first.files.has('src/main/java/lib/ironpulse/subsystem/BeamBreak.java')).toBe(true);
+    expect(first.files.has('src/main/java/lib/ironpulse/command/RumbleCommand.java')).toBe(true);
+    expect(first.files.get('docs/IRONPULSE.md')).toContain('IronPulse Robotics');
   });
 
   it('creates only in an empty directory and emits a valid initial project.yaml', async () => {

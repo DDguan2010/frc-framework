@@ -752,6 +752,7 @@ export class AppShell extends LitElement {
   @state() private selectedEntityId: string | undefined;
   @state() private selectedSourcePath: string | undefined;
   @state() private preview: ProjectChangePreview | undefined;
+  private previewSelectionId: string | undefined;
   @state() private diffFilter = '';
   @state() private subsystemName = '';
   @state() private subsystemKind: Subsystem['kind'] = 'subsystem';
@@ -2377,6 +2378,7 @@ export class AppShell extends LitElement {
           <div class="summary-grid">
             <span>${t('app.version')}</span><strong>${this.appInfo?.version ?? '—'}</strong>
             <span>${t('app.developer')}</span><strong>0.2Studio</strong>
+            <span>${t('app.acknowledgements')}</span><strong>IronPulse 6941</strong>
             <span>${t('app.schemaVersion')}</span
             ><strong>${this.appInfo?.release.schemaVersion ?? '—'}</strong>
             <span>${t('app.baseVersion')}</span
@@ -4644,7 +4646,10 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
         this.project = result.project;
         this.restoreTreeState(result.project);
       }
-      if (result.preview !== undefined) this.preview = result.preview;
+      if (result.preview !== undefined) {
+        this.preview = result.preview;
+        this.previewSelectionId = this.selectedEntityId;
+      }
       this.externalChanges = [];
       this.notice =
         result.preview === undefined
@@ -4656,9 +4661,15 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   }
 
   private async previewCommand(command: DomainCommand): Promise<void> {
+    if (this.preview !== undefined) {
+      this.selectedEntityId = this.previewSelectionId;
+      this.notice = this.#i18n.t('diff.resolvePending');
+      return;
+    }
     await this.run(async () => {
       const preview = await window.framework.project.previewCommand(command);
       this.preview = preview;
+      this.previewSelectionId = this.selectedEntityId;
       this.notice = `${preview.changes.filter((change) => change.kind !== 'unchanged').length} ${this.#i18n.t('diff.files')}`;
       if (
         preview.problems.length === 0 &&
@@ -4680,6 +4691,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       this.restoreTreeState(this.project);
       this.selectedEntityId = selectedEntityId;
       this.preview = undefined;
+      this.previewSelectionId = undefined;
       this.notice = this.project.path;
       this.requestUpdate();
     });
@@ -4693,6 +4705,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   private readonly confirmSourceImport = async (): Promise<void> => {
     await this.run(async () => {
       this.preview = await window.framework.project.confirmSourceImport();
+      this.previewSelectionId = this.selectedEntityId;
       this.notice = this.#i18n.t('structured.importSummary');
     });
   };
@@ -4703,6 +4716,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     await this.run(async () => {
       await window.framework.project.discardPreview(preview.id);
       this.preview = undefined;
+      this.previewSelectionId = undefined;
       if (this.pendingNtValidation) {
         this.pendingNtValidation = false;
         this.ntWriteValidation = 'idle';
@@ -4880,18 +4894,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
         root.javaFile ??
         `src/main/java/${(root.javaPackage ?? `${model.project.javaPackage}.subsystems.${lowerFirst(root.symbol)}`).replace(/\./gu, '/')}/${root.symbol}.java`;
       this.deleteImpact = {
-        command: {
-          changes: {
-            autos: plan.model.autos,
-            bindings: plan.model.bindings,
-            commands: plan.model.commands,
-            devices: plan.model.devices,
-            presets: plan.model.presets,
-            subsystems: plan.model.subsystems,
-          },
-          target: { scope: 'model' },
-          type: 'update',
-        },
+        command: { collection: 'subsystems', id: subsystem.id, type: 'remove' },
         files: [
           'project.yaml',
           javaFile,

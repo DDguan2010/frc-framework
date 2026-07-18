@@ -1,0 +1,15 @@
+package lib.ironpulse.io;
+
+import org.littletonrobotics.junction.AutoLog;
+
+/** Hardware boundary for digital or analog beam-break sensors. */
+public interface BeamBreakIO {
+    @AutoLog
+    class BeamBreakIOInputs {
+        public boolean connected = true;
+        public boolean rawState = false;
+        public double value = 0.0;
+    }
+
+    default void updateInputs(BeamBreakIOInputs inputs) {}
+}

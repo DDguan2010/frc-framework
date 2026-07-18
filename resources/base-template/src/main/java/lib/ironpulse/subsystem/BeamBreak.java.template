@@ -1,0 +1,57 @@
+package lib.ironpulse.subsystem;
+
+import edu.wpi.first.math.filter.Debouncer;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.button.Trigger;
+import lib.ironpulse.io.BeamBreakIO;
+import lib.ironpulse.io.BeamBreakIOInputsAutoLogged;
+import org.littletonrobotics.junction.Logger;
+
+/** Logged and debounced beam-break wrapper with Trigger and wait-command helpers. */
+public final class BeamBreak {
+    private final BeamBreakIO io;
+    private final BeamBreakIOInputsAutoLogged inputs = new BeamBreakIOInputsAutoLogged();
+    private final Debouncer debouncer;
+    private final String logPath;
+    private boolean blocked;
+
+    public BeamBreak(String name, BeamBreakIO io, double debounceSeconds) {
+        this.io = io;
+        this.logPath = "Sensors/" + name;
+        this.debouncer =
+                new Debouncer(Math.max(0.0, debounceSeconds), Debouncer.DebounceType.kBoth);
+    }
+
+    /** Call from the owning subsystem's periodic method. */
+    public void update() {
+        io.updateInputs(inputs);
+        blocked = debouncer.calculate(inputs.rawState);
+        Logger.processInputs(logPath, inputs);
+        Logger.recordOutput(logPath + "/Blocked", blocked);
+    }
+
+    public boolean isBlocked() {
+        return blocked;
+    }
+
+    public boolean isConnected() {
+        return inputs.connected;
+    }
+
+    public double value() {
+        return inputs.value;
+    }
+
+    public Trigger blockedTrigger() {
+        return new Trigger(this::isBlocked);
+    }
+
+    public Command waitUntilBlocked() {
+        return Commands.waitUntil(this::isBlocked).withName("WaitUntilBeamBlocked");
+    }
+
+    public Command waitUntilClear() {
+        return Commands.waitUntil(() -> !isBlocked()).withName("WaitUntilBeamClear");
+    }
+}

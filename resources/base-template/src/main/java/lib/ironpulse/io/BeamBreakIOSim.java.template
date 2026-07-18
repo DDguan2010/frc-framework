@@ -1,0 +1,23 @@
+package lib.ironpulse.io;
+
+/** Mutable beam-break implementation for simulation and unit tests. */
+public final class BeamBreakIOSim implements BeamBreakIO {
+    private boolean blocked;
+    private double value;
+
+    public void setBlocked(boolean blocked) {
+        this.blocked = blocked;
+        value = blocked ? 1.0 : 0.0;
+    }
+
+    public void setValue(double value) {
+        this.value = value;
+    }
+
+    @Override
+    public void updateInputs(BeamBreakIOInputs inputs) {
+        inputs.connected = true;
+        inputs.rawState = blocked;
+        inputs.value = value;
+    }
+}

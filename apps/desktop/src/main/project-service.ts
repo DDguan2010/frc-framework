@@ -733,12 +733,14 @@ function mergeSourceOverlay(
     symbolCounts.set(command.symbol, (symbolCounts.get(command.symbol) ?? 0) + 1);
   }
   for (const command of inferred.commands) {
-    const exact = commands.find(
-      (candidate) =>
-        !matchedStructuredCommands.has(candidate.id) &&
-        candidate.javaFile === command.javaFile &&
-        candidate.displayName === command.displayName,
-    );
+    const exact =
+      commands.find((candidate) => candidate.id === command.id) ??
+      commands.find(
+        (candidate) =>
+          !matchedStructuredCommands.has(candidate.id) &&
+          candidate.javaFile === command.javaFile &&
+          candidate.displayName === command.displayName,
+      );
     const bySymbol =
       exact ??
       (symbolCounts.get(command.symbol) === 1

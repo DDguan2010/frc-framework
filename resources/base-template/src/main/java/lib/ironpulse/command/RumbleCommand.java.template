@@ -1,0 +1,46 @@
+package lib.ironpulse.command;
+
+import edu.wpi.first.wpilibj.GenericHID;
+import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj2.command.Command;
+
+/** Runs controller rumble for a fixed duration and always clears it when the command ends. */
+public final class RumbleCommand extends Command {
+    private final double durationSeconds;
+    private final GenericHID[] controllers;
+    private final double strength;
+    private final Timer timer = new Timer();
+
+    public RumbleCommand(double durationSeconds, GenericHID... controllers) {
+        this(durationSeconds, 1.0, controllers);
+    }
+
+    public RumbleCommand(double durationSeconds, double strength, GenericHID... controllers) {
+        this.durationSeconds = Math.max(0.0, durationSeconds);
+        this.strength = Math.max(0.0, Math.min(1.0, strength));
+        this.controllers = controllers.clone();
+    }
+
+    @Override
+    public void initialize() {
+        timer.restart();
+        setRumble(strength);
+    }
+
+    @Override
+    public void end(boolean interrupted) {
+        timer.stop();
+        setRumble(0.0);
+    }
+
+    @Override
+    public boolean isFinished() {
+        return timer.hasElapsed(durationSeconds);
+    }
+
+    private void setRumble(double value) {
+        for (GenericHID controller : controllers) {
+            controller.setRumble(GenericHID.RumbleType.kBothRumble, value);
+        }
+    }
+}

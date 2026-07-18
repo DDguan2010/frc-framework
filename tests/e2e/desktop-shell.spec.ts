@@ -336,7 +336,37 @@ test('production shell is secure, accessible, and interactive', async () => {
       'Intake',
     );
     await clickMaterialButton(page, page.locator('#subsystem-dialog md-filled-button'));
+    await expect(subsystemDialog).toBeHidden();
     await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeVisible();
+    const pendingSelection = await page
+      .locator('frc-framework-app')
+      .evaluate(
+        (element) => (element as HTMLElement & { selectedEntityId?: string }).selectedEntityId,
+      );
+
+    await page
+      .getByRole('main')
+      .getByRole('button', { name: i18n.t('structured.addSubsystem') })
+      .click();
+    await expect(subsystemDialog).toBeVisible();
+    await setMaterialField(
+      page.locator('#subsystem-dialog md-outlined-text-field').nth(0),
+      'Blocked while previewing',
+    );
+    await clickMaterialButton(page, page.locator('#subsystem-dialog md-filled-button'));
+    await expect(subsystemDialog).toBeHidden();
+    await expect(page.getByText(i18n.t('diff.resolvePending'), { exact: true })).toBeVisible();
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeVisible();
+    await expect
+      .poll(() =>
+        page
+          .locator('frc-framework-app')
+          .evaluate(
+            (element) => (element as HTMLElement & { selectedEntityId?: string }).selectedEntityId,
+          ),
+      )
+      .toBe(pendingSelection);
+
     await page.getByRole('button', { name: i18n.t('diff.apply') }).click();
     await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeHidden({
       timeout: 60_000,
