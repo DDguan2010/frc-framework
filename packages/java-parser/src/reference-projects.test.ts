@@ -70,10 +70,28 @@ describe.runIf(referencesAvailable)('local reference robot projects', () => {
       expect(report.model.controllers.length).toBeGreaterThanOrEqual(2);
       expect(report.model.bindings.length).toBeGreaterThanOrEqual(10);
       expect(report.model.subsystems.some((entry) => entry.displayName === 'Shooter')).toBe(true);
+      const shootingSuperstructure = report.model.subsystems.find(
+        (entry) => entry.symbol === 'ShootingSuperstructure',
+      );
+      expect(shootingSuperstructure).toBeDefined();
+      const shooterCommands = report.model.commands.filter(
+        (entry) => entry.javaFile?.endsWith('/Shooter/ShootingSuperstructure.java') === true,
+      );
+      expect(shooterCommands.length).toBeGreaterThan(5);
+      expect(
+        shooterCommands.every(
+          (command) =>
+            command.requirementIds.length === 1 &&
+            command.requirementIds[0] === shootingSuperstructure?.id,
+        ),
+      ).toBe(true);
       expect(report.model.subsystems.some((entry) => entry.symbol === 'ShotCalculator')).toBe(
         false,
       );
       expect(report.model.commands.some((entry) => entry.symbol === 'AutoAimCommand')).toBe(true);
+      expect(
+        report.model.commands.find((entry) => entry.symbol === 'AutoAimCommand')?.requirementIds,
+      ).toEqual([]);
       expect(report.model.subsystems.some((entry) => entry.symbol.endsWith('Config'))).toBe(false);
       expect(report.model.controllers.length).toBeGreaterThanOrEqual(2);
       expect(report.model.bindings.length).toBeGreaterThan(10);

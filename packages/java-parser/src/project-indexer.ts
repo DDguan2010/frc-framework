@@ -212,7 +212,7 @@ function inferModel(
   }
   const devices = inferDevices(files, subsystemByFile);
   const controllers = inferControllers(files, metadata.javaPackage);
-  const commands = inferCommands(files, metadata.javaPackage);
+  const commands = inferCommands(files, metadata.javaPackage, subsystemByFile, subsystems);
   const controllerByField = new Map(controllers.map((entry) => [entry.symbol, entry]));
   const bindings = inferBindings(files, metadata.javaPackage, controllerByField, commands);
   const autos = inferAutos(files, metadata.javaPackage, commands);
@@ -475,9 +475,12 @@ function inferControllers(
 function inferCommands(
   files: readonly IndexedProjectFile[],
   basePackage: string,
+  subsystemByFile: ReadonlyMap<string, Subsystem>,
+  subsystems: readonly Subsystem[],
 ): readonly CommandDefinition[] {
   const factories = files.flatMap((file) => {
     if (!isRobotRuntimeSource(file, basePackage)) return [];
+    const owner = commandOwner(file, subsystemByFile, subsystems);
     return file.index.commandMethods.flatMap((method) => {
       if (/^(?:getAutonomousCommand|selectedCommand)$/u.test(method.name)) return [];
       return [
@@ -486,7 +489,7 @@ function inferCommands(
           id: stableId(`command:${file.path}:${method.name}:${method.parameters}`),
           javaFile: file.path,
           kind: 'custom' as const,
-          requirementIds: [],
+          requirementIds: owner === undefined ? [] : [owner.id],
           symbol: method.name,
         },
       ];
@@ -494,6 +497,7 @@ function inferCommands(
   });
   const commandClasses = files.flatMap((file) => {
     if (!isRobotRuntimeSource(file, basePackage)) return [];
+    const owner = commandOwner(file, subsystemByFile, subsystems);
     return file.index.types
       .filter(
         (type) =>
@@ -509,11 +513,32 @@ function inferCommands(
         id: stableId(`command-class:${file.path}:${type.name}`),
         javaFile: file.path,
         kind: 'custom' as const,
-        requirementIds: [],
+        requirementIds: owner === undefined ? [] : [owner.id],
         symbol: type.name,
       }));
   });
   return [...factories, ...commandClasses];
+}
+
+function commandOwner(
+  file: IndexedProjectFile,
+  subsystemByFile: ReadonlyMap<string, Subsystem>,
+  subsystems: readonly Subsystem[],
+): Subsystem | undefined {
+  const exact = subsystemByFile.get(file.path);
+  if (exact !== undefined) return exact;
+  const normalizedFile = normalize(file.path);
+  return subsystems
+    .filter((subsystem) => {
+      if (subsystem.javaFile === undefined) return false;
+      const directory = normalize(path.posix.dirname(normalize(subsystem.javaFile)));
+      return normalizedFile.startsWith(`${directory}/`);
+    })
+    .sort((left, right) => {
+      const leftLength = path.posix.dirname(normalize(left.javaFile ?? '')).length;
+      const rightLength = path.posix.dirname(normalize(right.javaFile ?? '')).length;
+      return rightLength - leftLength;
+    })[0];
 }
 
 function inferBindings(

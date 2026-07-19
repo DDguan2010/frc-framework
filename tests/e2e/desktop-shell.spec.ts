@@ -212,8 +212,10 @@ test('production shell is secure, accessible, and interactive', async () => {
 
     const commandSource = path.join(projectRoot, 'src/main/java/frc/robot/e2e/commands');
     const autoSource = path.join(projectRoot, 'src/main/java/frc/robot/e2e/auto');
+    const subsystemSource = path.join(projectRoot, 'src/main/java/frc/robot/e2e/subsystems/Arm');
     await mkdir(commandSource, { recursive: true });
     await mkdir(autoSource, { recursive: true });
+    await mkdir(subsystemSource, { recursive: true });
     await writeFile(
       path.join(commandSource, 'TeamCommands.java'),
       `package frc.robot.e2e.commands;
@@ -228,6 +230,17 @@ test('production shell is secure, accessible, and interactive', async () => {
        import edu.wpi.first.wpilibj2.command.Command;
        public final class CompetitionAutos {
          public static Command centerAuto() { return null; }
+       }
+      `,
+      'utf8',
+    );
+    await writeFile(
+      path.join(subsystemSource, 'ArmSubsystem.java'),
+      `package frc.robot.e2e.subsystems.Arm;
+       import edu.wpi.first.wpilibj2.command.Command;
+       import edu.wpi.first.wpilibj2.command.SubsystemBase;
+       public final class ArmSubsystem extends SubsystemBase {
+         public Command home() { return runOnce(() -> {}); }
        }
       `,
       'utf8',
@@ -264,6 +277,19 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect(
       importedCommandRow.getByRole('button', { name: i18n.t('tree.delete') }),
     ).toHaveCount(0);
+    const importedArmTreeItem = page.getByRole('treeitem', {
+      name: /^ArmSubsystem subsystem/u,
+    });
+    await expect(importedArmTreeItem).toBeVisible();
+    const logicTreeSearch = page.locator('md-outlined-text-field.tree-search');
+    await setMaterialField(logicTreeSearch, 'home');
+    const nestedHomeCommand = page.getByRole('treeitem', { name: 'home() command' });
+    await expect(nestedHomeCommand).toBeVisible();
+    await expect(nestedHomeCommand.locator('..')).toHaveAttribute(
+      'style',
+      /padding-left:\s*35px/iu,
+    );
+    await setMaterialField(logicTreeSearch, '');
     await clickMaterialButton(
       page,
       page

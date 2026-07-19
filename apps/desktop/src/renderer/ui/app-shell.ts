@@ -4379,18 +4379,27 @@ export class AppShell extends LitElement {
               });
       this.dialog('preset-dialog')?.close();
       const previousSubsystemIds = new Set(model.subsystems.map((entry) => entry.id));
+      const previousDeviceIds = new Set(model.devices.map((entry) => entry.id));
       const createdSubsystem = next.subsystems.find(
         (subsystem) => !previousSubsystemIds.has(subsystem.id),
       );
       if (createdSubsystem !== undefined) this.revealEntityInTree(next, createdSubsystem.id);
       await this.previewCommand({
-        changes: {
-          devices: next.devices,
-          presets: next.presets,
-          subsystems: next.subsystems,
-        },
-        target: { scope: 'model' },
-        type: 'update',
+        commands: [
+          ...next.subsystems
+            .filter((subsystem) => !previousSubsystemIds.has(subsystem.id))
+            .map((entity): DomainCommand => ({ collection: 'subsystems', entity, type: 'add' })),
+          ...next.devices
+            .filter((device) => !previousDeviceIds.has(device.id))
+            .map((entity): DomainCommand => ({ collection: 'devices', entity, type: 'add' })),
+          {
+            changes: { presets: next.presets },
+            target: { scope: 'model' },
+            type: 'update',
+          },
+        ],
+        label: `Add preset ${this.presetKind}`,
+        type: 'batch',
       });
       if (createdSubsystem !== undefined) {
         this.revealEntityInTree(next, createdSubsystem.id);
@@ -5384,12 +5393,18 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     const model = this.model();
     if (model === undefined) return;
     await this.previewCommand({
-      changes: {
-        bindings: model.bindings.filter((binding) => binding.controllerId !== controllerId),
-        controllers: model.controllers.filter((controller) => controller.id !== controllerId),
-      },
-      target: { scope: 'model' },
-      type: 'update',
+      commands: [
+        ...model.bindings
+          .filter((binding) => binding.controllerId === controllerId)
+          .map((binding): DomainCommand => ({
+            collection: 'bindings',
+            id: binding.id,
+            type: 'remove',
+          })),
+        { collection: 'controllers', id: controllerId, type: 'remove' },
+      ],
+      label: 'Remove controller and its bindings',
+      type: 'batch',
     });
   }
 
@@ -5401,39 +5416,65 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       this.notice = this.#i18n.t('structured.importedReadOnlyHint');
       return;
     }
+    const commandUpdates: DomainCommand[] = model.commands.flatMap((entry) => {
+      if (
+        entry.childCommandIds?.includes(commandId) !== true ||
+        this.isUnmanagedPath(model, entry.javaFile)
+      )
+        return [];
+      return [
+        {
+          changes: {
+            childCommandIds: entry.childCommandIds.filter((childId) => childId !== commandId),
+          },
+          target: { collection: 'commands', id: entry.id, scope: 'entity' },
+          type: 'update',
+        },
+      ];
+    });
+    const subsystemUpdates: DomainCommand[] = model.subsystems.flatMap((subsystem) => {
+      if (
+        subsystem.stateMachine === undefined ||
+        this.isSubsystemSourceReadOnly(model, subsystem) ||
+        !subsystem.stateMachine.states.some((state) =>
+          state.actions.some((action) => action.commandId === commandId),
+        )
+      )
+        return [];
+      return [
+        {
+          changes: {
+            stateMachine: {
+              ...subsystem.stateMachine,
+              states: subsystem.stateMachine.states.map((state) => ({
+                ...state,
+                actions: state.actions.filter((action) => action.commandId !== commandId),
+              })),
+            },
+          },
+          target: { collection: 'subsystems', id: subsystem.id, scope: 'entity' },
+          type: 'update',
+        },
+      ];
+    });
     await this.previewCommand({
-      changes: {
-        autos: model.autos.filter((auto) => auto.commandId !== commandId),
-        bindings: model.bindings.filter((binding) => binding.commandId !== commandId),
-        commands: model.commands
-          .filter((command) => command.id !== commandId)
-          .map((command) => ({
-            ...command,
-            ...(command.childCommandIds === undefined
-              ? {}
-              : {
-                  childCommandIds: command.childCommandIds.filter(
-                    (childId) => childId !== commandId,
-                  ),
-                }),
+      commands: [
+        ...commandUpdates,
+        ...subsystemUpdates,
+        ...model.autos
+          .filter((auto) => auto.commandId === commandId)
+          .map((auto): DomainCommand => ({ collection: 'autos', id: auto.id, type: 'remove' })),
+        ...model.bindings
+          .filter((binding) => binding.commandId === commandId)
+          .map((binding): DomainCommand => ({
+            collection: 'bindings',
+            id: binding.id,
+            type: 'remove',
           })),
-        subsystems: model.subsystems.map((subsystem) => ({
-          ...subsystem,
-          ...(subsystem.stateMachine === undefined
-            ? {}
-            : {
-                stateMachine: {
-                  ...subsystem.stateMachine,
-                  states: subsystem.stateMachine.states.map((state) => ({
-                    ...state,
-                    actions: state.actions.filter((action) => action.commandId !== commandId),
-                  })),
-                },
-              }),
-        })),
-      },
-      target: { scope: 'model' },
-      type: 'update',
+        { collection: 'commands', id: commandId, type: 'remove' },
+      ],
+      label: 'Remove command and its references',
+      type: 'batch',
     });
   }
 

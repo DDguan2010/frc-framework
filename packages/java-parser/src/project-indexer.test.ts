@@ -72,6 +72,18 @@ describe('JavaProjectIndexer', () => {
     expect(first.model.devices[0]?.symbol).toBe('UpperMotor');
     expect(first.model.controllers[0]?.provider).toBe('CommandXboxController');
     expect(first.model.commands.some((command) => command.symbol === 'shoot')).toBe(true);
+    const upperShooter = first.model.subsystems.find(
+      (subsystem) => subsystem.symbol === 'UpperShooter',
+    );
+    expect(upperShooter).toBeDefined();
+    expect(
+      first.model.commands
+        .filter((command) => command.symbol === 'shoot')
+        .every((command) => command.requirementIds[0] === upperShooter?.id),
+    ).toBe(true);
+    expect(
+      first.model.commands.find((command) => command.symbol === 'centerFourPiece')?.requirementIds,
+    ).toEqual([]);
     expect(first.model.bindings).toHaveLength(2);
     expect(first.model.commands).toHaveLength(3);
     expect(first.model.autos.map((auto) => auto.symbol)).toEqual(['centerFourPiece']);
@@ -105,8 +117,9 @@ describe('JavaProjectIndexer', () => {
   it('recognizes handwritten subsystem inheritance, state goals, command classes, and HID ports', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-handwritten-'));
     const subsystemSource = path.join(root, 'src/main/java/frc/robot/subsystems/Arm');
+    const subsystemCommandSource = path.join(subsystemSource, 'commands');
     const commandSource = path.join(root, 'src/main/java/frc/robot/commands');
-    await mkdir(subsystemSource, { recursive: true });
+    await mkdir(subsystemCommandSource, { recursive: true });
     await mkdir(commandSource, { recursive: true });
     await writeFile(
       path.join(subsystemSource, 'ArmSubsystem.java'),
@@ -130,6 +143,13 @@ describe('JavaProjectIndexer', () => {
       'utf8',
     );
     await writeFile(
+      path.join(subsystemCommandSource, 'HoldArmCommand.java'),
+      `package frc.robot.subsystems.Arm.commands;
+       import edu.wpi.first.wpilibj2.command.Command;
+       public final class HoldArmCommand implements Command {}`,
+      'utf8',
+    );
+    await writeFile(
       path.join(root, 'src/main/java/frc/robot/RobotContainer.java'),
       `package frc.robot;
        import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
@@ -150,13 +170,22 @@ describe('JavaProjectIndexer', () => {
     ]);
     expect(arm?.behaviorMode).toBe('goal-driven');
     expect(report.model.subsystems.some((entry) => entry.symbol === 'ShotCalculator')).toBe(false);
-    expect(report.model.commands).toEqual([
-      expect.objectContaining({
-        factory: false,
-        javaFile: 'src/main/java/frc/robot/commands/ScoreCommand.java',
-        symbol: 'ScoreCommand',
-      }),
-    ]);
+    expect(report.model.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          factory: false,
+          javaFile: 'src/main/java/frc/robot/commands/ScoreCommand.java',
+          requirementIds: [],
+          symbol: 'ScoreCommand',
+        }),
+        expect.objectContaining({
+          factory: false,
+          javaFile: 'src/main/java/frc/robot/subsystems/Arm/commands/HoldArmCommand.java',
+          requirementIds: [arm?.id],
+          symbol: 'HoldArmCommand',
+        }),
+      ]),
+    );
     expect(report.model.controllers[0]?.port).toBe(4);
     expect(report.model.unmanagedFiles).toEqual(
       expect.arrayContaining([
