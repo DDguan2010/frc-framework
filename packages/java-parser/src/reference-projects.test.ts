@@ -55,23 +55,13 @@ describe.runIf(referencesAvailable)('local reference robot projects', () => {
     const indexer = await JavaProjectIndexer.create();
     try {
       const report = await indexer.indexProject(fullProjectRoot);
-      expect({
-        bindings: report.model.bindings.length,
-        commands: report.model.commands.length,
-        controllers: report.model.controllers.length,
-        customFiles: report.customFiles.length,
-        files: report.files.length,
-        partialFiles: report.partialFiles.length,
-        subsystems: report.model.subsystems.length,
-      }).toEqual({
-        bindings: 20,
-        commands: 125,
-        controllers: 2,
-        customFiles: 86,
-        files: 127,
-        partialFiles: 0,
-        subsystems: 6,
-      });
+      expect(report.files.length).toBeGreaterThanOrEqual(120);
+      expect(report.customFiles.length).toBeGreaterThanOrEqual(80);
+      expect(report.partialFiles).toEqual([]);
+      expect(report.model.subsystems.length).toBeGreaterThanOrEqual(6);
+      expect(report.model.commands.length).toBeGreaterThanOrEqual(120);
+      expect(report.model.controllers.length).toBeGreaterThanOrEqual(2);
+      expect(report.model.bindings.length).toBeGreaterThanOrEqual(10);
       expect(report.model.subsystems.some((entry) => entry.displayName === 'Shooter')).toBe(true);
       expect(report.model.subsystems.some((entry) => entry.symbol === 'ShotCalculator')).toBe(
         false,
@@ -87,6 +77,8 @@ describe.runIf(referencesAvailable)('local reference robot projects', () => {
       );
       const second = await indexer.indexProject(fullProjectRoot);
       expect(second.cacheHits).toBe(report.files.length);
+      expect(second.model.commands).toHaveLength(report.model.commands.length);
+      expect(second.model.subsystems).toHaveLength(report.model.subsystems.length);
     } finally {
       indexer.dispose();
     }

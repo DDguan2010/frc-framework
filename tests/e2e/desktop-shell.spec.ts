@@ -129,6 +129,28 @@ test('production shell is secure, accessible, and interactive', async () => {
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
 
+    await dragHorizontalHandle(page, '.resize-left', 440);
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          const shell = element as HTMLElement & { layout?: { leftPanelWidth?: number } };
+          return shell.layout?.leftPanelWidth;
+        }),
+      )
+      .toBeGreaterThanOrEqual(560);
+    await dragHorizontalHandle(page, '.resize-left', -400);
+
+    await dragHorizontalHandle(page, '.resize-inspector', -440);
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          const shell = element as HTMLElement & { layout?: { inspectorWidth?: number } };
+          return shell.layout?.inspectorWidth;
+        }),
+      )
+      .toBeGreaterThanOrEqual(640);
+    await dragHorizontalHandle(page, '.resize-inspector', 440);
+
     await page.screenshot({
       animations: 'disabled',
       fullPage: true,
@@ -585,6 +607,23 @@ async function clickMaterialButton(_page: Page, button: Locator): Promise<void> 
   await button.scrollIntoViewIfNeeded();
   await expect(button).toBeVisible();
   await button.evaluate((element) => (element as HTMLElement).click());
+}
+
+async function dragHorizontalHandle(
+  page: Page,
+  selector: '.resize-inspector' | '.resize-left',
+  deltaX: number,
+): Promise<void> {
+  const handle = page.locator(selector);
+  await expect(handle).toBeVisible();
+  const bounds = await handle.boundingBox();
+  if (bounds === null) throw new Error(`Resize handle ${selector} has no bounds.`);
+  const startX = bounds.x + bounds.width / 2;
+  const startY = bounds.y + Math.min(40, bounds.height / 2);
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + deltaX, startY, { steps: 8 });
+  await page.mouse.up();
 }
 
 async function waitForExternalSync(page: Page): Promise<void> {

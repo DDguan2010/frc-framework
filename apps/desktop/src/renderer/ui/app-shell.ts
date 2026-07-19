@@ -99,6 +99,14 @@ const fallbackWindow: WindowState = {
   width: 1360,
 };
 
+const PANEL_LAYOUT = {
+  inspectorMaximum: 840,
+  inspectorMinimum: 240,
+  leftMaximum: 720,
+  leftMinimum: 120,
+  workspaceMinimum: 360,
+} as const;
+
 @customElement('frc-framework-app')
 export class AppShell extends LitElement {
   static override styles = css`
@@ -123,7 +131,7 @@ export class AppShell extends LitElement {
         'top top top'
         'nav content inspector'
         'nav bottom inspector';
-      grid-template-columns: var(--left-width) minmax(420px, 1fr) var(--inspector-width);
+      grid-template-columns: var(--left-width) minmax(360px, 1fr) var(--inspector-width);
       grid-template-rows: 64px minmax(0, 1fr) var(--bottom-height);
       height: 100%;
       overflow: hidden;
@@ -424,34 +432,59 @@ export class AppShell extends LitElement {
       z-index: 5;
     }
 
+    .resize-handle::after {
+      background: transparent;
+      content: '';
+      position: absolute;
+    }
+
     .resize-handle:hover,
     .resize-handle:focus-visible {
-      background: var(--md-sys-color-primary);
       outline: none;
+    }
+
+    .resize-handle:hover::after,
+    .resize-handle:focus-visible::after {
+      background: var(--md-sys-color-primary);
     }
 
     .resize-left {
       bottom: 0;
       cursor: col-resize;
-      left: calc(var(--left-width) - 2px);
+      left: calc(var(--left-width) - 5px);
       top: 64px;
-      width: 4px;
+      width: 10px;
+    }
+
+    .resize-left::after,
+    .resize-inspector::after {
+      bottom: 0;
+      left: 4px;
+      top: 0;
+      width: 2px;
     }
 
     .resize-inspector {
       bottom: 0;
       cursor: col-resize;
-      right: calc(var(--inspector-width) - 2px);
+      right: calc(var(--inspector-width) - 5px);
       top: 64px;
-      width: 4px;
+      width: 10px;
     }
 
     .resize-bottom {
-      bottom: calc(var(--bottom-height) - 2px);
+      bottom: calc(var(--bottom-height) - 5px);
       cursor: row-resize;
-      height: 4px;
+      height: 10px;
       left: var(--left-width);
       right: var(--inspector-width);
+    }
+
+    .resize-bottom::after {
+      height: 2px;
+      left: 0;
+      right: 0;
+      top: 4px;
     }
 
     md-outlined-text-field,
@@ -682,12 +715,8 @@ export class AppShell extends LitElement {
           'nav content inspector'
           'nav bottom inspector';
         grid-template-columns:
-          clamp(144px, var(--left-width), 176px) minmax(360px, 1fr)
-          clamp(240px, var(--inspector-width), 280px);
-      }
-
-      .resize-handle {
-        display: none;
+          var(--left-width) minmax(320px, 1fr)
+          var(--inspector-width);
       }
 
       main {
@@ -705,6 +734,10 @@ export class AppShell extends LitElement {
       }
 
       aside {
+        display: none;
+      }
+
+      .resize-handle {
         display: none;
       }
 
@@ -727,6 +760,16 @@ export class AppShell extends LitElement {
 
   readonly #i18n = new I18n(resolveLocale(navigator.language));
   readonly #keyHandler = (event: KeyboardEvent) => this.onKeyDown(event);
+  #preferredPanelWidths = {
+    inspectorWidth: fallbackWindow.inspectorWidth,
+    leftPanelWidth: fallbackWindow.leftPanelWidth,
+  };
+  readonly #windowResizeHandler = (): void => {
+    this.layout = constrainPanelLayout(
+      { ...this.layout, ...this.#preferredPanelWidths },
+      window.innerWidth,
+    );
+  };
   #removeProjectListener: (() => void) | undefined;
   #removeFilesChangedListener: (() => void) | undefined;
   #ntTimer: ReturnType<typeof setInterval> | undefined;
@@ -869,6 +912,7 @@ export class AppShell extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('keydown', this.#keyHandler);
+    window.addEventListener('resize', this.#windowResizeHandler);
     this.#removeProjectListener = window.framework.project.onOpened((project) => {
       this.project = project;
       this.notice = project.path;
@@ -2395,6 +2439,7 @@ export class AppShell extends LitElement {
 
   override disconnectedCallback(): void {
     window.removeEventListener('keydown', this.#keyHandler);
+    window.removeEventListener('resize', this.#windowResizeHandler);
     this.#removeProjectListener?.();
     this.#removeFilesChangedListener?.();
     if (this.#ntTimer !== undefined) clearInterval(this.#ntTimer);
@@ -2587,21 +2632,33 @@ export class AppShell extends LitElement {
           class="resize-handle resize-left"
           role="separator"
           tabindex="0"
+          aria-label=${t('layout.resizeNavigation')}
           aria-orientation="vertical"
+          aria-valuemin=${String(PANEL_LAYOUT.leftMinimum)}
+          aria-valuemax=${String(PANEL_LAYOUT.leftMaximum)}
+          aria-valuenow=${String(this.layout.leftPanelWidth)}
           @pointerdown=${(event: PointerEvent) => this.startResize('left', event)}
         ></div>
         <div
           class="resize-handle resize-inspector"
           role="separator"
           tabindex="0"
+          aria-label=${t('layout.resizeInspector')}
           aria-orientation="vertical"
+          aria-valuemin=${String(PANEL_LAYOUT.inspectorMinimum)}
+          aria-valuemax=${String(PANEL_LAYOUT.inspectorMaximum)}
+          aria-valuenow=${String(this.layout.inspectorWidth)}
           @pointerdown=${(event: PointerEvent) => this.startResize('inspector', event)}
         ></div>
         <div
           class="resize-handle resize-bottom"
           role="separator"
           tabindex="0"
+          aria-label=${t('layout.resizeOutput')}
           aria-orientation="horizontal"
+          aria-valuemin="96"
+          aria-valuemax="420"
+          aria-valuenow=${String(this.layout.bottomPanelHeight)}
           @pointerdown=${(event: PointerEvent) => this.startResize('bottom', event)}
         ></div>
       </div>
@@ -3800,7 +3857,11 @@ export class AppShell extends LitElement {
         window.framework.app.getInfo(),
       ]);
       this.settings = settings;
-      this.layout = layout;
+      this.#preferredPanelWidths = {
+        inspectorWidth: layout.inspectorWidth,
+        leftPanelWidth: layout.leftPanelWidth,
+      };
+      this.layout = constrainPanelLayout(layout, window.innerWidth);
       this.recentProjects = recentProjects;
       this.editors = editors;
       this.appInfo = appInfo;
@@ -5862,14 +5923,36 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     const startY = event.clientY;
     const move = (moveEvent: PointerEvent): void => {
       if (kind === 'left') {
+        const maximum = Math.min(
+          PANEL_LAYOUT.leftMaximum,
+          Math.max(
+            PANEL_LAYOUT.leftMinimum,
+            window.innerWidth - initial.inspectorWidth - PANEL_LAYOUT.workspaceMinimum,
+          ),
+        );
         this.layout = {
           ...this.layout,
-          leftPanelWidth: clamp(initial.leftPanelWidth + moveEvent.clientX - startX, 84, 320),
+          leftPanelWidth: clamp(
+            initial.leftPanelWidth + moveEvent.clientX - startX,
+            PANEL_LAYOUT.leftMinimum,
+            maximum,
+          ),
         };
       } else if (kind === 'inspector') {
+        const maximum = Math.min(
+          PANEL_LAYOUT.inspectorMaximum,
+          Math.max(
+            PANEL_LAYOUT.inspectorMinimum,
+            window.innerWidth - initial.leftPanelWidth - PANEL_LAYOUT.workspaceMinimum,
+          ),
+        );
         this.layout = {
           ...this.layout,
-          inspectorWidth: clamp(initial.inspectorWidth - moveEvent.clientX + startX, 240, 520),
+          inspectorWidth: clamp(
+            initial.inspectorWidth - moveEvent.clientX + startX,
+            PANEL_LAYOUT.inspectorMinimum,
+            maximum,
+          ),
         };
       } else {
         this.layout = {
@@ -5881,6 +5964,10 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     const up = (): void => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      this.#preferredPanelWidths = {
+        inspectorWidth: this.layout.inspectorWidth,
+        leftPanelWidth: this.layout.leftPanelWidth,
+      };
       void window.framework.window.updateState({
         bottomPanelHeight: this.layout.bottomPanelHeight,
         inspectorWidth: this.layout.inspectorWidth,
@@ -6074,6 +6161,30 @@ function formatFileSize(bytes: number): string {
 
 function inputValue(event: Event): string {
   return (event.target as HTMLInputElement).value;
+}
+
+function constrainPanelLayout(layout: WindowState, viewportWidth: number): WindowState {
+  const left = clamp(layout.leftPanelWidth, PANEL_LAYOUT.leftMinimum, PANEL_LAYOUT.leftMaximum);
+  const inspector = clamp(
+    layout.inspectorWidth,
+    PANEL_LAYOUT.inspectorMinimum,
+    PANEL_LAYOUT.inspectorMaximum,
+  );
+  const minimumPanels = PANEL_LAYOUT.leftMinimum + PANEL_LAYOUT.inspectorMinimum;
+  const availablePanels = Math.max(minimumPanels, viewportWidth - PANEL_LAYOUT.workspaceMinimum);
+  const flexBudget = Math.max(0, availablePanels - minimumPanels);
+  const leftFlex = left - PANEL_LAYOUT.leftMinimum;
+  const inspectorFlex = inspector - PANEL_LAYOUT.inspectorMinimum;
+  const requestedFlex = leftFlex + inspectorFlex;
+  if (requestedFlex <= flexBudget) {
+    return { ...layout, inspectorWidth: inspector, leftPanelWidth: left };
+  }
+  const scale = requestedFlex === 0 ? 0 : flexBudget / requestedFlex;
+  return {
+    ...layout,
+    inspectorWidth: Math.round(PANEL_LAYOUT.inspectorMinimum + inspectorFlex * scale),
+    leftPanelWidth: Math.round(PANEL_LAYOUT.leftMinimum + leftFlex * scale),
+  };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
