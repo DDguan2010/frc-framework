@@ -56,6 +56,35 @@ export function subsystemUsesAutomaticJavaLocation(
   );
 }
 
+/**
+ * Returns the field name used when the composition root or RobotCommands injects this node.
+ * Duplicate class symbols are qualified by their hierarchy so every generated field stays unique.
+ */
+export function subsystemJavaFieldName(
+  model: FrcProjectModel,
+  subsystemOrId: Subsystem | string,
+): string {
+  const subsystem =
+    typeof subsystemOrId === 'string'
+      ? model.subsystems.find((entry) => entry.id === subsystemOrId)
+      : subsystemOrId;
+  if (subsystem === undefined) throw new Error(`Subsystem ${subsystemOrId} does not exist.`);
+  if (model.subsystems.filter((entry) => entry.symbol === subsystem.symbol).length === 1) {
+    return lowerFirst(subsystem.symbol);
+  }
+  const path: string[] = [subsystem.symbol];
+  let cursor = subsystem;
+  const visited = new Set<string>([subsystem.id]);
+  while (cursor.parentId !== undefined) {
+    const parent = model.subsystems.find((entry) => entry.id === cursor.parentId);
+    if (parent === undefined || visited.has(parent.id)) break;
+    visited.add(parent.id);
+    path.unshift(parent.symbol);
+    cursor = parent;
+  }
+  return lowerFirst(path.join(''));
+}
+
 export function rootSubsystem(
   model: FrcProjectModel,
   subsystemOrId: Subsystem | string,

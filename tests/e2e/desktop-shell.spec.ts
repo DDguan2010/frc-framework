@@ -492,6 +492,22 @@ test('production shell is secure, accessible, and interactive', async () => {
     await clickMaterialButton(page, page.locator('#subsystem-dialog md-text-button'));
     await expect(subsystemDialog).toBeHidden();
 
+    const inspector = page.getByRole('complementary', { name: i18n.t('inspector.title') });
+    await setMaterialFieldAndCommit(
+      inspector.locator('md-outlined-text-field').first(),
+      'Collector Intake',
+    );
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeVisible();
+    await expect(inspector.locator('.path').first()).toHaveText(
+      'src/main/java/frc/robot/e2e/subsystems/collectorIntake/CollectorIntake.java',
+    );
+    await page.getByRole('button', { name: i18n.t('diff.apply') }).click();
+    await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeHidden({
+      timeout: 60_000,
+    });
+    await waitForExternalSync(page);
+    await expect(page.getByRole('button', { name: 'Collector Intake direct' })).toBeVisible();
+
     await clickMaterialButton(
       page,
       page
@@ -616,6 +632,15 @@ async function setMaterialField(field: Locator, value: string): Promise<void> {
     const materialField = element as HTMLElement & { value: string };
     materialField.value = nextValue;
     materialField.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  }, value);
+}
+
+async function setMaterialFieldAndCommit(field: Locator, value: string): Promise<void> {
+  await field.evaluate((element, nextValue) => {
+    const materialField = element as HTMLElement & { value: string };
+    materialField.value = nextValue;
+    materialField.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    materialField.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
   }, value);
 }
 

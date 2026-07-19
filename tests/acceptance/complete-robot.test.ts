@@ -1,4 +1,5 @@
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -18,7 +19,16 @@ import {
   instantiateSwervePreset,
 } from '../../packages/presets/src/index.ts';
 import { parseProjectYaml } from '../../packages/project-io/src/index.ts';
-import { describe, expect, it } from 'vitest';
+import {
+  collectTuningParameters,
+  compareTuningValues,
+  createSaveTuningSnapshotCommand,
+  createWriteNtValuesCommand,
+} from '../../packages/nt-client/src/index.ts';
+import { discoverJava, runGradle } from '../../packages/toolchain/src/index.ts';
+import { ProjectService } from '../../apps/desktop/src/main/project-service.ts';
+import { SettingsStore } from '../../apps/desktop/src/main/settings-store.ts';
+import { afterAll, describe, expect, it } from 'vitest';
 
 function goalMachine(names: readonly string[]): StateMachine {
   return {
@@ -330,10 +340,19 @@ function completeRobotModel(): FrcProjectModel {
 describe.runIf(process.env.FRC_FRAMEWORK_RUN_ACCEPTANCE_ROBOT === '1')(
   'complete generated robot acceptance project',
   () => {
+    const temporaryRoots: string[] = [];
+
+    afterAll(async () => {
+      await Promise.all(
+        temporaryRoots.map((root) =>
+          rm(root, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 }),
+        ),
+      );
+    });
+
     it('creates, compiles, formats, tests, serializes, and re-indexes a realistic robot', async () => {
-      const root = path.resolve('output/acceptance-robot');
-      await rm(root, { force: true, recursive: true });
-      await mkdir(root, { recursive: true });
+      const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-acceptance-robot-'));
+      temporaryRoots.push(root);
       const model = completeRobotModel();
       expect(validateModel(model).filter((problem) => problem.severity === 'error')).toEqual([]);
       await createProject({ model, projectRoot: root });
@@ -384,5 +403,286 @@ describe.runIf(process.env.FRC_FRAMEWORK_RUN_ACCEPTANCE_ROBOT === '1')(
       expect(report.files.some((file) => file.hasSyntaxErrors)).toBe(false);
       expect(report.model.subsystems.some((entry) => entry.symbol.endsWith('Config'))).toBe(false);
     }, 700_000);
+
+    it('survives a complete nested edit, relocation, reopen, and rebuild lifecycle', async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-lifecycle-robot-'));
+      const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-lifecycle-state-'));
+      const model = completeRobotModel();
+      const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+      await store.load();
+      const service = new ProjectService(store, path.resolve('resources/base-template'), {
+        validateCreatedProject: false,
+      });
+      try {
+        await createProject({ model, projectRoot: root, validateBuild: false });
+        const opened = await service.open(root);
+        expect(opened.problems).toEqual([]);
+        expect(opened.model?.subsystems.map((entry) => entry.symbol).sort()).toEqual(
+          model.subsystems.map((entry) => entry.symbol).sort(),
+        );
+        expect(opened.model?.devices).toHaveLength(model.devices.length);
+        expect(opened.model?.controllers).toHaveLength(model.controllers.length);
+        expect(opened.model?.commands.map((entry) => entry.symbol).sort()).toEqual(
+          model.commands.map((entry) => entry.symbol).sort(),
+        );
+        expect(opened.model?.bindings).toHaveLength(model.bindings.length);
+        expect(opened.model?.autos).toHaveLength(model.autos.length);
+        const intake = requiredSubsystem(model, 'Intake');
+        const shooter = requiredSubsystem(model, 'Shooter');
+        const pivot = requiredSubsystem(model, 'IntakePivot');
+        const helperId = createEntityId();
+
+        await applyCommand(service, {
+          collection: 'subsystems',
+          entity: {
+            displayName: 'Absolute Zero Sensor',
+            id: helperId,
+            kind: 'mechanism',
+            parentId: pivot.id,
+            symbol: 'AbsoluteZeroSensor',
+          },
+          type: 'add',
+        });
+        const initialHelperPath =
+          'src/main/java/frc/robot/acceptance/subsystems/intake/intakePivot/absoluteZeroSensor/AbsoluteZeroSensor.java';
+        const helperSource = await readFile(path.join(root, initialHelperPath), 'utf8');
+        await writeFile(
+          path.join(root, initialHelperPath),
+          helperSource
+            .replace(
+              'package frc.robot.acceptance.subsystems.intake.intakePivot.absoluteZeroSensor;',
+              'package frc.robot.acceptance.subsystems.intake.intakePivot.absoluteZeroSensor;\n\nimport java.util.Optional;',
+            )
+            .replace(
+              /\n\}\s*$/u,
+              '\n    public Optional<String> teamOwnedDiagnostic() { return Optional.empty(); }\n}\n',
+            ),
+          'utf8',
+        );
+
+        await applyCommand(service, {
+          changes: { parentId: shooter.id },
+          target: { collection: 'subsystems', id: pivot.id, scope: 'entity' },
+          type: 'update',
+        });
+        const movedHelperPath =
+          'src/main/java/frc/robot/acceptance/subsystems/shooter/intakePivot/absoluteZeroSensor/AbsoluteZeroSensor.java';
+        expect(await readFile(path.join(root, movedHelperPath), 'utf8')).toContain(
+          'teamOwnedDiagnostic()',
+        );
+
+        await applyCommand(service, {
+          collection: 'subsystems',
+          displayName: 'Collector Pivot',
+          id: pivot.id,
+          symbol: 'CollectorPivot',
+          type: 'rename',
+        });
+        const renamedHelperPath =
+          'src/main/java/frc/robot/acceptance/subsystems/shooter/collectorPivot/absoluteZeroSensor/AbsoluteZeroSensor.java';
+        const renamedHelper = await readFile(path.join(root, renamedHelperPath), 'utf8');
+        expect(renamedHelper).toContain(
+          'package frc.robot.acceptance.subsystems.shooter.collectorPivot.absoluteZeroSensor;',
+        );
+        expect(renamedHelper).toContain('import java.util.Optional;');
+        expect(renamedHelper).toContain('teamOwnedDiagnostic()');
+
+        const current = await service.refresh();
+        const collectorPivot = current.model?.subsystems.find((entry) => entry.id === pivot.id);
+        if (collectorPivot === undefined)
+          throw new Error('Collector Pivot disappeared after refresh.');
+        const states = collectorPivot.stateMachine?.states ?? [];
+        await applyCommand(service, {
+          changes: {
+            behaviorMode: 'goal-driven',
+            stateMachine: {
+              states: [
+                ...states,
+                {
+                  actions: [],
+                  displayName: 'Service Position',
+                  id: createEntityId(),
+                  symbol: 'ServicePosition',
+                },
+              ],
+              transitions: collectorPivot.stateMachine?.transitions ?? [],
+            },
+          },
+          target: { collection: 'subsystems', id: pivot.id, scope: 'entity' },
+          type: 'update',
+        });
+        const collectorPath =
+          'src/main/java/frc/robot/acceptance/subsystems/shooter/collectorPivot/CollectorPivot.java';
+        expect(await readFile(path.join(root, collectorPath), 'utf8')).toContain(
+          'SERVICE_POSITION',
+        );
+
+        await applyCommand(service, {
+          changes: {
+            stateMachine: {
+              states,
+              transitions: collectorPivot.stateMachine?.transitions ?? [],
+            },
+          },
+          target: { collection: 'subsystems', id: pivot.id, scope: 'entity' },
+          type: 'update',
+        });
+        expect(await readFile(path.join(root, collectorPath), 'utf8')).not.toContain(
+          'SERVICE_POSITION',
+        );
+
+        await applyCommand(service, {
+          changes: { parentId: intake.id },
+          target: { collection: 'subsystems', id: pivot.id, scope: 'entity' },
+          type: 'update',
+        });
+        const finalCollectorPath =
+          'src/main/java/frc/robot/acceptance/subsystems/intake/collectorPivot/CollectorPivot.java';
+        const finalHelperPath =
+          'src/main/java/frc/robot/acceptance/subsystems/intake/collectorPivot/absoluteZeroSensor/AbsoluteZeroSensor.java';
+        expect(await readFile(path.join(root, finalCollectorPath), 'utf8')).toContain(
+          'public final class CollectorPivot',
+        );
+        expect(await readFile(path.join(root, finalHelperPath), 'utf8')).toContain(
+          'teamOwnedDiagnostic()',
+        );
+
+        await service.close();
+        const reopened = await service.open(root);
+        expect(reopened.problems).toEqual([]);
+        expect(reopened.model?.subsystems.find((entry) => entry.id === pivot.id)).toMatchObject({
+          displayName: 'Collector Pivot',
+          parentId: intake.id,
+          symbol: 'CollectorPivot',
+        });
+        const allIds = modelEntityIds(reopened.model);
+        expect(new Set(allIds).size).toBe(allIds.length);
+
+        const reopenedModel = reopened.model;
+        if (reopenedModel === undefined) throw new Error('Lifecycle model disappeared on reopen.');
+        const declarations = collectTuningParameters(reopenedModel);
+        expect(declarations.length).toBeGreaterThan(20);
+        const gain = declarations.find(
+          (entry) => entry.key === 'kP' && entry.deviceName === 'UpperFlywheel Motor',
+        );
+        if (gain === undefined) throw new Error('Upper flywheel kP is not exposed to NT tuning.');
+        expect(gain.writable).toBe(true);
+        const tunedValue = Number(gain.codeValue) + 0.031;
+        const comparisons = compareTuningValues(
+          declarations,
+          new Map([
+            [gain.path, { type: 'double' as const, updatedAtMillis: 9_500, value: tunedValue }],
+          ]),
+          { nowMillis: 10_000 },
+        );
+        await applyCommand(
+          service,
+          createWriteNtValuesCommand(
+            reopenedModel,
+            comparisons,
+            new Set([gain.parameterId]),
+            new Date('2026-07-20T00:00:00Z'),
+          ),
+        );
+        const afterTuning = await service.refresh();
+        expect(
+          afterTuning.model?.devices
+            .flatMap((device) => device.parameters)
+            .find((parameter) => parameter.id === gain.parameterId),
+        ).toMatchObject({ source: 'networktables', value: tunedValue });
+        expect(afterTuning.model?.tuningHistory.at(-1)?.changes).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ parameterId: gain.parameterId, newValue: tunedValue }),
+          ]),
+        );
+        const tuningJava = await readFile(
+          path.join(root, 'src/main/java/frc/robot/acceptance/tuning/TuningParameters.java'),
+          'utf8',
+        );
+        expect(tuningJava).toContain(String(tunedValue));
+
+        if (afterTuning.model === undefined) throw new Error('Tuned model disappeared.');
+        await applyCommand(
+          service,
+          createSaveTuningSnapshotCommand(
+            afterTuning.model,
+            'Lifecycle verified',
+            comparisons,
+            new Date('2026-07-20T00:01:00Z'),
+          ),
+        );
+        expect((await service.refresh()).model?.tuningSnapshots.at(-1)?.name).toBe(
+          'Lifecycle verified',
+        );
+
+        await applyCommand(service, {
+          collection: 'subsystems',
+          id: helperId,
+          type: 'remove',
+        });
+        await expect(readFile(path.join(root, finalHelperPath), 'utf8')).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+        await service.close();
+
+        const toolchain = await discoverJava({ projectYear: model.project.wpilibYear });
+        expect(toolchain.selected).toBeDefined();
+        const build = await runGradle({
+          java: toolchain.selected,
+          projectRoot: root,
+          tasks: ['spotlessApply', 'compileJava', 'test'],
+          timeoutMs: 600_000,
+        });
+        expect(build.success, `${build.stdout}\n${build.stderr}`).toBe(true);
+
+        const indexer = await JavaProjectIndexer.create();
+        const report = await indexer.indexProject(root);
+        expect(report.files.some((file) => file.hasSyntaxErrors)).toBe(false);
+        expect(report.model.subsystems.some((entry) => entry.symbol.endsWith('Config'))).toBe(
+          false,
+        );
+      } finally {
+        await service.close();
+        await rm(root, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+        await rm(stateRoot, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+      }
+    }, 700_000);
   },
 );
+
+async function applyCommand(
+  service: ProjectService,
+  command: Parameters<ProjectService['previewCommand']>[0],
+): Promise<void> {
+  const preview = await service.previewCommand(command);
+  expect(preview.problems).toEqual([]);
+  await service.applyPreview(preview.id);
+}
+
+function requiredSubsystem(model: FrcProjectModel, symbol: string): Subsystem {
+  const subsystem = model.subsystems.find((entry) => entry.symbol === symbol);
+  if (subsystem === undefined) throw new Error(`Acceptance fixture is missing ${symbol}.`);
+  return subsystem;
+}
+
+function modelEntityIds(model: FrcProjectModel | undefined): readonly string[] {
+  if (model === undefined) return [];
+  return [
+    model.project.id,
+    model.robot.id,
+    ...model.subsystems.flatMap((subsystem) => [
+      subsystem.id,
+      ...(subsystem.stateMachine?.states.map((state) => state.id) ?? []),
+      ...(subsystem.stateMachine?.transitions.map((transition) => transition.id) ?? []),
+    ]),
+    ...model.devices.flatMap((device) => [
+      device.id,
+      ...device.parameters.map((parameter) => parameter.id),
+    ]),
+    ...model.controllers.map((controller) => controller.id),
+    ...model.commands.map((command) => command.id),
+    ...model.bindings.map((binding) => binding.id),
+    ...model.autos.map((auto) => auto.id),
+    ...model.presets.map((preset) => preset.id),
+  ];
+}

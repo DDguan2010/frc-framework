@@ -261,6 +261,8 @@ export const en = {
   'structured.subsystemName': 'Subsystem name',
   'structured.superstructure': 'Superstructure / helper',
   'structured.symbol': 'Java symbol',
+  'structured.symbolHint':
+    'Follows the display name automatically until you customize this advanced identifier.',
   'structured.title': 'Robot structure',
   'structured.telemetryFieldPublisher': 'Field state publisher (Field2d)',
   'structured.telemetryStateRecorder': 'Robot state recorder (AdvantageKit)',
@@ -602,6 +604,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'structured.subsystemName': 'Subsystem 名称',
   'structured.superstructure': 'Superstructure / 辅助节点',
   'structured.symbol': 'Java 标识符',
+  'structured.symbolHint': '默认随名称自动更新；只有需要兼容既有代码时才手动修改此高级标识符。',
   'structured.title': '机器人结构',
   'structured.telemetryFieldPublisher': '场地状态发布（Field2d）',
   'structured.telemetryStateRecorder': '机器人状态记录（AdvantageKit）',

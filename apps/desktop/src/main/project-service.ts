@@ -194,10 +194,14 @@ export class ProjectService {
       }
       const parsed = await loadProjectYaml(yamlPath);
       const sourceReport = parsed.model === undefined ? undefined : await this.#sourceReport(root);
-      const visibleModel =
+      const structuredModel =
         parsed.model === undefined || sourceReport === undefined
           ? parsed.model
-          : mergeSourceOverlay(parsed.model, sourceReport.model);
+          : reconcileLegacySourceImport(parsed.model, sourceReport.model);
+      const visibleModel =
+        structuredModel === undefined || sourceReport === undefined
+          ? structuredModel
+          : mergeSourceOverlay(structuredModel, sourceReport.model);
       result = {
         displayName: visibleModel?.project.displayName ?? path.basename(root),
         mode: 'yaml',
@@ -205,18 +209,19 @@ export class ProjectService {
         path: root,
         problems: [
           ...parsed.problems.map((problem) => problem.message),
-          ...(parsed.model === undefined
+          ...(structuredModel === undefined
             ? []
             : [
-                ...validateModel(parsed.model).map((problem) => problem.message),
-                ...validatePresetCompatibility(parsed.model),
-                ...(await validateAutoResources(root, parsed.model)),
+                ...validateModel(structuredModel).map((problem) => problem.message),
+                ...validatePresetCompatibility(structuredModel),
+                ...(await validateAutoResources(root, structuredModel)),
               ]),
         ],
         readOnly,
         sourceFiles: await sourceFiles(root, sourceReport, this.#externalFiles),
       };
-      this.#session = parsed.model === undefined ? undefined : new DomainSession(parsed.model);
+      this.#session =
+        structuredModel === undefined ? undefined : new DomainSession(structuredModel);
       this.#sourceImportPending = false;
     } catch (error) {
       if (!isNodeError(error) || error.code !== 'ENOENT') {
@@ -880,6 +885,154 @@ interface PendingChange {
 }
 
 /**
+ * Early source imports persisted inferred v5 entities but omitted unmanagedFiles. Newer indexers
+ * intentionally exclude Config/Constants/helper classes, so those stale entities would otherwise
+ * remain editable and could make a later structured edit generate over handwritten source. Restore
+ * source ownership in memory; the next confirmed edit writes the repaired YAML transactionally.
+ */
+function reconcileLegacySourceImport(
+  structured: FrcProjectModel,
+  inferred: FrcProjectModel,
+): FrcProjectModel {
+  const explicitlyUnmanaged = new Set(structured.unmanagedFiles.map(normalizeOverlayPath));
+  const inferredUnmanaged = new Set(inferred.unmanagedFiles.map(normalizeOverlayPath));
+  const legacyOwnershipDetected =
+    structured.subsystems.some(
+      (subsystem) =>
+        subsystem.javaFile !== undefined &&
+        !explicitlyUnmanaged.has(normalizeOverlayPath(subsystem.javaFile)) &&
+        inferredUnmanaged.has(normalizeOverlayPath(subsystem.javaFile)) &&
+        inferred.subsystems.some((candidate) => candidate.id === subsystem.id),
+    ) ||
+    structured.commands.some(
+      (command) =>
+        command.javaFile !== undefined &&
+        !explicitlyUnmanaged.has(normalizeOverlayPath(command.javaFile)) &&
+        inferredUnmanaged.has(normalizeOverlayPath(command.javaFile)) &&
+        inferred.commands.some((candidate) => candidate.id === command.id),
+    ) ||
+    structured.controllers.some(
+      (controller) =>
+        isStableSourceId(controller.id) &&
+        inferred.controllers.some((candidate) => candidate.id === controller.id),
+    );
+  const legacySubsystemIds = new Set(
+    structured.subsystems
+      .filter((subsystem) => {
+        if (subsystem.javaFile === undefined || !isStableSourceId(subsystem.id)) return false;
+        const file = normalizeOverlayPath(subsystem.javaFile);
+        const stillInferred = inferred.subsystems.some(
+          (candidate) =>
+            candidate.id === subsystem.id ||
+            (candidate.symbol === subsystem.symbol &&
+              normalizeOverlayPath(candidate.javaFile ?? '') === file),
+        );
+        return inferredUnmanaged.has(file) && !explicitlyUnmanaged.has(file) && !stillInferred;
+      })
+      .map((subsystem) => subsystem.id),
+  );
+  let foundLegacyAncestor = true;
+  while (foundLegacyAncestor) {
+    foundLegacyAncestor = false;
+    for (const subsystem of structured.subsystems) {
+      const stillInferred = inferred.subsystems.some(
+        (candidate) =>
+          candidate.id === subsystem.id ||
+          (candidate.symbol === subsystem.symbol &&
+            candidate.javaPackage === subsystem.javaPackage),
+      );
+      if (
+        !legacySubsystemIds.has(subsystem.id) &&
+        isStableSourceId(subsystem.id) &&
+        !stillInferred &&
+        structured.subsystems.some(
+          (candidate) =>
+            legacySubsystemIds.has(candidate.id) && candidate.parentId === subsystem.id,
+        )
+      ) {
+        legacySubsystemIds.add(subsystem.id);
+        foundLegacyAncestor = true;
+      }
+    }
+  }
+
+  const legacyCommandIds = new Set(
+    structured.commands
+      .filter((command) => {
+        if (command.javaFile === undefined || !isStableSourceId(command.id)) return false;
+        const file = normalizeOverlayPath(command.javaFile);
+        const stillInferred = inferred.commands.some(
+          (candidate) =>
+            candidate.id === command.id ||
+            (candidate.symbol === command.symbol &&
+              normalizeOverlayPath(candidate.javaFile ?? '') === file),
+        );
+        return inferredUnmanaged.has(file) && !explicitlyUnmanaged.has(file) && !stillInferred;
+      })
+      .map((command) => command.id),
+  );
+  const legacyControllerIds = new Set(
+    structured.controllers
+      .filter(
+        (controller) =>
+          isStableSourceId(controller.id) &&
+          (structured.bindings.some(
+            (binding) =>
+              binding.controllerId === controller.id && binding.codeReference !== undefined,
+          ) ||
+            inferred.controllers.some((candidate) => candidate.id === controller.id)),
+      )
+      .map((controller) => controller.id),
+  );
+  if (
+    legacySubsystemIds.size === 0 &&
+    legacyCommandIds.size === 0 &&
+    legacyControllerIds.size === 0 &&
+    !legacyOwnershipDetected
+  ) {
+    return structured;
+  }
+
+  const subsystems = structured.subsystems
+    .filter((subsystem) => !legacySubsystemIds.has(subsystem.id))
+    .map((subsystem) => {
+      if (subsystem.parentId === undefined || !legacySubsystemIds.has(subsystem.parentId)) {
+        return subsystem;
+      }
+      const inferredSubsystem = inferred.subsystems.find(
+        (candidate) =>
+          candidate.id === subsystem.id ||
+          (candidate.symbol === subsystem.symbol && candidate.javaFile === subsystem.javaFile),
+      );
+      const withoutParent = Object.fromEntries(
+        Object.entries(subsystem).filter(([key]) => key !== 'parentId'),
+      ) as typeof subsystem;
+      return inferredSubsystem?.parentId === undefined
+        ? withoutParent
+        : { ...withoutParent, parentId: inferredSubsystem.parentId };
+    });
+
+  return {
+    ...structured,
+    autos: structured.autos.filter(
+      (auto) => auto.commandId === undefined || !legacyCommandIds.has(auto.commandId),
+    ),
+    bindings: structured.bindings.filter(
+      (binding) =>
+        !legacyControllerIds.has(binding.controllerId) &&
+        (binding.commandId === undefined || !legacyCommandIds.has(binding.commandId)),
+    ),
+    commands: structured.commands.filter((command) => !legacyCommandIds.has(command.id)),
+    controllers: structured.controllers.filter(
+      (controller) => !legacyControllerIds.has(controller.id),
+    ),
+    devices: structured.devices.filter((device) => !legacySubsystemIds.has(device.parentId)),
+    subsystems,
+    unmanagedFiles: [...new Set([...structured.unmanagedFiles, ...inferred.unmanagedFiles])].sort(),
+  };
+}
+
+/**
  * Adds read-only entities discovered in Java to the UI model without writing them into project.yaml.
  * Structured entities remain authoritative; source-only entries are replaced from the latest index so
  * deleted or renamed handwritten types do not remain as stale editable nodes.
@@ -889,6 +1042,59 @@ function mergeSourceOverlay(
   inferred: FrcProjectModel,
 ): FrcProjectModel {
   const unmanaged = new Set(structured.unmanagedFiles.map(normalizeOverlayPath));
+  const inferredUnmanaged = new Set(inferred.unmanagedFiles.map(normalizeOverlayPath));
+  let generatedPaths = new Set<string>();
+  try {
+    generatedPaths = new Set(generateStructuredFiles(structured).keys());
+  } catch {
+    // Invalid projects must remain openable. Explicit unmanaged ownership still wins below.
+  }
+  const isSourceOwned = (file: string): boolean => {
+    const normalized = normalizeOverlayPath(file);
+    return (
+      inferredUnmanaged.has(normalized) &&
+      (unmanaged.has(normalized) || !generatedPaths.has(normalized))
+    );
+  };
+  const sourceSubsystemIds = new Set(
+    inferred.subsystems
+      .filter((subsystem) => subsystem.javaFile !== undefined && isSourceOwned(subsystem.javaFile))
+      .map((subsystem) => subsystem.id),
+  );
+  let foundSourceAncestor = true;
+  while (foundSourceAncestor) {
+    foundSourceAncestor = false;
+    for (const subsystem of inferred.subsystems) {
+      if (
+        !sourceSubsystemIds.has(subsystem.id) &&
+        inferred.subsystems.some(
+          (candidate) =>
+            sourceSubsystemIds.has(candidate.id) && candidate.parentId === subsystem.id,
+        )
+      ) {
+        sourceSubsystemIds.add(subsystem.id);
+        foundSourceAncestor = true;
+      }
+    }
+  }
+  const sourceSubsystems = inferred.subsystems.filter((subsystem) =>
+    sourceSubsystemIds.has(subsystem.id),
+  );
+  const sourceDevices = inferred.devices.filter((device) =>
+    sourceSubsystemIds.has(device.parentId),
+  );
+  const sourceCommands = inferred.commands.filter(
+    (command) => command.javaFile !== undefined && isSourceOwned(command.javaFile),
+  );
+  const sourceCommandIds = new Set(sourceCommands.map((command) => command.id));
+  const sourceBindings = inferred.bindings.filter(
+    (binding) =>
+      binding.codeReference !== undefined &&
+      isSourceOwned(binding.codeReference.replace(/:\d+$/u, '')),
+  );
+  const sourceAutos = inferred.autos.filter(
+    (auto) => auto.commandId !== undefined && sourceCommandIds.has(auto.commandId),
+  );
   const importedSubsystemIds = new Set(
     structured.subsystems
       .filter(
@@ -920,7 +1126,7 @@ function mergeSourceOverlay(
   );
   const inferredToVisibleSubsystem = new Map<string, string>();
   const matchedStructuredSubsystems = new Set<string>();
-  for (const subsystem of inferred.subsystems) {
+  for (const subsystem of sourceSubsystems) {
     const match =
       subsystems.find((candidate) => candidate.id === subsystem.id) ??
       subsystems.find(
@@ -933,11 +1139,22 @@ function mergeSourceOverlay(
     inferredToVisibleSubsystem.set(subsystem.id, visibleId);
     if (match !== undefined) matchedStructuredSubsystems.add(match.id);
   }
-  for (const subsystem of inferred.subsystems) {
+  for (const subsystem of sourceSubsystems) {
     if (matchedStructuredSubsystems.has(inferredToVisibleSubsystem.get(subsystem.id) ?? ''))
       continue;
+    const metadata = structured.subsystems.find(
+      (candidate) =>
+        importedSubsystemIds.has(candidate.id) &&
+        (candidate.id === subsystem.id ||
+          (candidate.symbol === subsystem.symbol && candidate.javaFile === subsystem.javaFile)),
+    );
     subsystems.push({
       ...subsystem,
+      ...(metadata === undefined ? {} : { displayName: metadata.displayName }),
+      ...(metadata?.notes === undefined ? {} : { notes: metadata.notes }),
+      ...(metadata?.networkTablesPath === undefined
+        ? {}
+        : { networkTablesPath: metadata.networkTablesPath }),
       ...(subsystem.parentId === undefined
         ? {}
         : {
@@ -957,7 +1174,7 @@ function mergeSourceOverlay(
   }
 
   const devices = structured.devices.filter((device) => !importedSubsystemIds.has(device.parentId));
-  for (const device of inferred.devices) {
+  for (const device of sourceDevices) {
     const parentId = inferredToVisibleSubsystem.get(device.parentId) ?? device.parentId;
     if (
       devices.some(
@@ -975,11 +1192,11 @@ function mergeSourceOverlay(
       .filter(
         (controller) =>
           isStableSourceId(controller.id) &&
-          (structured.bindings.some(
+          !inferred.controllers.some((candidate) => candidate.id === controller.id) &&
+          structured.bindings.some(
             (binding) =>
               binding.controllerId === controller.id && binding.codeReference !== undefined,
-          ) ||
-            inferred.controllers.some((candidate) => candidate.id === controller.id)),
+          ),
       )
       .map((controller) => controller.id),
   );
@@ -997,7 +1214,21 @@ function mergeSourceOverlay(
           candidate.port === controller.port,
       );
     inferredToVisibleController.set(controller.id, match?.id ?? controller.id);
-    if (match === undefined) controllers.push(controller);
+    if (match === undefined) {
+      const metadata = structured.controllers.find(
+        (candidate) => importedControllerIds.has(candidate.id) && candidate.id === controller.id,
+      );
+      controllers.push({
+        ...controller,
+        ...(metadata === undefined
+          ? {}
+          : {
+              displayName: metadata.displayName,
+              role: metadata.role,
+              ...(metadata.customRole === undefined ? {} : { customRole: metadata.customRole }),
+            }),
+      });
+    }
   }
 
   const importedCommandIds = new Set(
@@ -1012,10 +1243,10 @@ function mergeSourceOverlay(
   const inferredToVisibleCommand = new Map<string, string>();
   const matchedStructuredCommands = new Set<string>();
   const symbolCounts = new Map<string, number>();
-  for (const command of inferred.commands) {
+  for (const command of sourceCommands) {
     symbolCounts.set(command.symbol, (symbolCounts.get(command.symbol) ?? 0) + 1);
   }
-  for (const command of inferred.commands) {
+  for (const command of sourceCommands) {
     const exact =
       commands.find((candidate) => candidate.id === command.id) ??
       commands.find(
@@ -1033,7 +1264,17 @@ function mergeSourceOverlay(
           )
         : undefined);
     if (bySymbol === undefined) {
-      commands.push(command);
+      const metadata = structured.commands.find(
+        (candidate) =>
+          importedCommandIds.has(candidate.id) &&
+          (candidate.id === command.id ||
+            (candidate.symbol === command.symbol && candidate.javaFile === command.javaFile)),
+      );
+      commands.push({
+        ...command,
+        ...(metadata === undefined ? {} : { displayName: metadata.displayName }),
+        ...(metadata?.notes === undefined ? {} : { notes: metadata.notes }),
+      });
       inferredToVisibleCommand.set(command.id, command.id);
     } else {
       matchedStructuredCommands.add(bySymbol.id);
@@ -1042,7 +1283,7 @@ function mergeSourceOverlay(
   }
 
   const bindings = structured.bindings.filter((binding) => binding.codeReference === undefined);
-  for (const binding of inferred.bindings) {
+  for (const binding of sourceBindings) {
     const controllerId =
       inferredToVisibleController.get(binding.controllerId) ?? binding.controllerId;
     const commandId =
@@ -1070,7 +1311,7 @@ function mergeSourceOverlay(
   const autos = structured.autos.filter(
     (auto) => auto.commandId === undefined || !importedCommandIds.has(auto.commandId),
   );
-  for (const auto of inferred.autos) {
+  for (const auto of sourceAutos) {
     const commandId =
       auto.commandId === undefined
         ? undefined

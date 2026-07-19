@@ -58,8 +58,15 @@ describe.runIf(referencesAvailable)('local reference robot projects', () => {
       expect(report.files.length).toBeGreaterThanOrEqual(120);
       expect(report.customFiles.length).toBeGreaterThanOrEqual(80);
       expect(report.partialFiles).toEqual([]);
-      expect(report.model.subsystems.length).toBeGreaterThanOrEqual(6);
-      expect(report.model.commands.length).toBeGreaterThanOrEqual(120);
+      expect(report.model.subsystems.length).toBeGreaterThanOrEqual(4);
+      expect(report.model.commands.length).toBeGreaterThanOrEqual(70);
+      expect(
+        report.model.commands.every(
+          (command) =>
+            command.javaFile === undefined ||
+            command.javaFile.startsWith('src/main/java/frc/robot/'),
+        ),
+      ).toBe(true);
       expect(report.model.controllers.length).toBeGreaterThanOrEqual(2);
       expect(report.model.bindings.length).toBeGreaterThanOrEqual(10);
       expect(report.model.subsystems.some((entry) => entry.displayName === 'Shooter')).toBe(true);

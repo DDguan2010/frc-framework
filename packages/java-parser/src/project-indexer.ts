@@ -211,11 +211,11 @@ function inferModel(
     if (node !== undefined) subsystemByFile.set(file.path, node);
   }
   const devices = inferDevices(files, subsystemByFile);
-  const controllers = inferControllers(files);
+  const controllers = inferControllers(files, metadata.javaPackage);
   const commands = inferCommands(files, metadata.javaPackage);
   const controllerByField = new Map(controllers.map((entry) => [entry.symbol, entry]));
-  const bindings = inferBindings(files, controllerByField, commands);
-  const autos = inferAutos(files, commands);
+  const bindings = inferBindings(files, metadata.javaPackage, controllerByField, commands);
+  const autos = inferAutos(files, metadata.javaPackage, commands);
   return {
     ...base,
     autos,
@@ -235,9 +235,11 @@ function inferModel(
 
 function inferAutos(
   files: readonly IndexedProjectFile[],
+  basePackage: string,
   commands: readonly CommandDefinition[],
 ): readonly AutoRoutine[] {
   return files.flatMap((file) => {
+    if (!isRobotRuntimeSource(file, basePackage)) return [];
     const autoType = file.index.types.find(
       (type) => type.kind === 'class' && /(?:Auto|Routine)/iu.test(type.name),
     );
@@ -270,15 +272,7 @@ function inferSubsystems(
   basePackage: string,
 ): readonly Subsystem[] {
   const candidates = files.flatMap((file) => {
-    if (
-      file.index.packageName === undefined ||
-      !(
-        file.index.packageName === basePackage ||
-        file.index.packageName.startsWith(`${basePackage}.`)
-      )
-    ) {
-      return [];
-    }
+    if (!isRobotRuntimeSource(file, basePackage)) return [];
     const match = /(?:^|\/)(?:subsystems?|mechanisms?)\/(.+)\.java$/iu.exec(file.path);
     const primary = file.index.types.find((type) => type.kind === 'class');
     if (match === null || primary === undefined) return [];
@@ -287,7 +281,8 @@ function inferSubsystems(
     const directory = directories.join('/');
     const ownsDirectory =
       directories.length > 0 &&
-      javaSymbol(directories.at(-1) ?? '').toLowerCase() === primary.name.toLowerCase();
+      (javaSymbol(directories.at(-1) ?? '').toLowerCase() === primary.name.toLowerCase() ||
+        primary.name.endsWith('Subsystem'));
     if (!isSubsystemCandidate(file, primary, ownsDirectory)) return [];
     return [{ directories, directory, file, ownsDirectory, primary }];
   });
@@ -448,10 +443,14 @@ function inferDevices(
   return devices;
 }
 
-function inferControllers(files: readonly IndexedProjectFile[]): readonly Controller[] {
+function inferControllers(
+  files: readonly IndexedProjectFile[],
+  basePackage: string,
+): readonly Controller[] {
   const controllers: Controller[] = [];
   const usedPorts = new Set<number>();
   for (const file of files) {
+    if (!isRobotRuntimeSource(file, basePackage)) continue;
     for (const declaration of file.index.controllers) {
       if (controllers.some((entry) => entry.symbol === declaration.fieldName)) continue;
       let port = declaration.port;
@@ -477,26 +476,24 @@ function inferCommands(
   files: readonly IndexedProjectFile[],
   basePackage: string,
 ): readonly CommandDefinition[] {
-  const factories = files.flatMap((file) =>
-    file.index.commandMethods.map((method) => ({
-      displayName: `${method.name}${method.parameters}`,
-      id: stableId(`command:${file.path}:${method.name}:${method.parameters}`),
-      javaFile: file.path,
-      kind: 'custom' as const,
-      requirementIds: [],
-      symbol: method.name,
-    })),
-  );
+  const factories = files.flatMap((file) => {
+    if (!isRobotRuntimeSource(file, basePackage)) return [];
+    return file.index.commandMethods.flatMap((method) => {
+      if (/^(?:getAutonomousCommand|selectedCommand)$/u.test(method.name)) return [];
+      return [
+        {
+          displayName: `${method.name}${method.parameters}`,
+          id: stableId(`command:${file.path}:${method.name}:${method.parameters}`),
+          javaFile: file.path,
+          kind: 'custom' as const,
+          requirementIds: [],
+          symbol: method.name,
+        },
+      ];
+    });
+  });
   const commandClasses = files.flatMap((file) => {
-    if (
-      file.index.packageName === undefined ||
-      !(
-        file.index.packageName === basePackage ||
-        file.index.packageName.startsWith(`${basePackage}.`)
-      )
-    ) {
-      return [];
-    }
+    if (!isRobotRuntimeSource(file, basePackage)) return [];
     return file.index.types
       .filter(
         (type) =>
@@ -521,6 +518,7 @@ function inferCommands(
 
 function inferBindings(
   files: readonly IndexedProjectFile[],
+  basePackage: string,
   controllerByField: ReadonlyMap<string, Controller>,
   commands: readonly CommandDefinition[],
 ): readonly ControlBinding[] {
@@ -529,27 +527,40 @@ function inferBindings(
     if (!commandBySymbol.has(command.symbol)) commandBySymbol.set(command.symbol, command);
   }
   return files.flatMap((file) =>
-    file.index.bindings.flatMap((binding, index) => {
-      const controllerName = /^([A-Za-z_$][\w$]*)/u.exec(binding.triggerExpression)?.[1];
-      const controller =
-        controllerName === undefined ? undefined : controllerByField.get(controllerName);
-      if (controller === undefined) return [];
-      const commandName = /^([A-Za-z_$][\w$]*)\s*\(/u.exec(binding.commandExpression)?.[1];
-      const command = commandName === undefined ? undefined : commandBySymbol.get(commandName);
-      const supported = ['onTrue', 'onFalse', 'whileTrue', 'toggleOnTrue'] as const;
-      const behavior = supported.find((entry) => entry === binding.event) ?? 'custom';
-      return [
-        {
-          behavior,
-          ...(command === undefined ? {} : { commandId: command.id }),
-          codeReference: `${file.path}:${String(binding.range.start.row + 1)}`,
-          controllerId: controller.id,
-          id: stableId(`binding:${file.path}:${String(index)}:${binding.triggerExpression}`),
-          input: binding.triggerExpression,
-        },
-      ];
-    }),
+    !isRobotRuntimeSource(file, basePackage)
+      ? []
+      : file.index.bindings.flatMap((binding, index) => {
+          const controllerName = /^([A-Za-z_$][\w$]*)/u.exec(binding.triggerExpression)?.[1];
+          const controller =
+            controllerName === undefined ? undefined : controllerByField.get(controllerName);
+          if (controller === undefined) return [];
+          const commandName = /^([A-Za-z_$][\w$]*)\s*\(/u.exec(binding.commandExpression)?.[1];
+          const command = commandName === undefined ? undefined : commandBySymbol.get(commandName);
+          const supported = ['onTrue', 'onFalse', 'whileTrue', 'toggleOnTrue'] as const;
+          const behavior = supported.find((entry) => entry === binding.event) ?? 'custom';
+          return [
+            {
+              behavior,
+              ...(command === undefined ? {} : { commandId: command.id }),
+              codeReference: `${file.path}:${String(binding.range.start.row + 1)}`,
+              controllerId: controller.id,
+              id: stableId(`binding:${file.path}:${String(index)}:${binding.triggerExpression}`),
+              input: binding.triggerExpression,
+            },
+          ];
+        }),
   );
+}
+
+function isRobotRuntimeSource(file: IndexedProjectFile, basePackage: string): boolean {
+  const packageName = file.index.packageName;
+  if (
+    packageName === undefined ||
+    !(packageName === basePackage || packageName.startsWith(`${basePackage}.`))
+  ) {
+    return false;
+  }
+  return !/^src\/(?:test|integrationTest|ext|generated)\//iu.test(file.path);
 }
 
 async function listJavaFiles(root: string): Promise<readonly string[]> {

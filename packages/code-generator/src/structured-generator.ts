@@ -5,7 +5,11 @@ import type {
   StateDefinition,
   Subsystem,
 } from '@frc-framework/domain';
-import { rootSubsystem, subsystemJavaLocation } from '@frc-framework/domain';
+import {
+  rootSubsystem,
+  subsystemJavaFieldName,
+  subsystemJavaLocation,
+} from '@frc-framework/domain';
 import { findComponentDefinition, validateHardware } from '@frc-framework/frc-catalog';
 import { collectTuningParameters } from '@frc-framework/nt-client';
 import { generatePresetFiles } from '@frc-framework/presets';
@@ -1556,19 +1560,7 @@ function compositionOrder(model: FrcProjectModel): readonly Subsystem[] {
 }
 
 function compositionFieldName(model: FrcProjectModel, node: Subsystem): string {
-  if (model.subsystems.filter((entry) => entry.symbol === node.symbol).length === 1)
-    return lowerFirst(node.symbol);
-  const path: string[] = [node.symbol];
-  let cursor = node;
-  const visited = new Set<string>([node.id]);
-  while (cursor.parentId !== undefined) {
-    const parent = model.subsystems.find((entry) => entry.id === cursor.parentId);
-    if (parent === undefined || visited.has(parent.id)) break;
-    visited.add(parent.id);
-    path.unshift(parent.symbol);
-    cursor = parent;
-  }
-  return lowerFirst(path.join(''));
+  return subsystemJavaFieldName(model, node);
 }
 
 function hardwareMapDocument(model: FrcProjectModel): string {

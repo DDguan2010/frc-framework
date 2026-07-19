@@ -44,7 +44,7 @@ pnpm dev
 
 选中任意 Subsystem、Mechanism 或更深节点后点击“代码”，会打开该节点自己的 Java 文件。例如 `Intake → IntakePivot` 默认对应 `subsystems/intake/Intake.java` 与 `subsystems/intake/intakePivot/IntakePivot.java`，不会再统一跳到 `Intake.java`。
 
-拖拽节点或在 Inspector 修改“所属父级”时，普通受管理节点的 Java、相邻 Config、package、import、构造注入、`project.yaml` 和 docs 会一起迁移；Managed 区域外的队伍方法和用户 import 会保留。若同时修改 Java 类名且文件含有无法安全重写的队伍代码，软件会停止并要求在 IDE 中处理，不会静默丢失。手写只读节点以及 Swerve/Limelight 等固定入口预制保持原位置并禁用结构迁移。
+拖拽节点或在 Inspector 修改“所属父级”时，普通受管理节点的 Java、相邻 Config、package、import、构造注入、`project.yaml` 和 docs 会一起迁移；Managed 区域外的队伍方法和用户 import 会保留。未手工定制的 Java 标识符会随显示名称自动更新，跨 Subsystem Command 中的类名和注入字段也会同步重构，同时避开字符串与注释。若同时修改 Java 类名且文件含有无法安全重写的队伍代码，软件会停止并要求在 IDE 中处理，不会静默丢失。手写只读节点以及 Swerve/Limelight 等固定入口预制保持原位置并禁用结构迁移。
 
 “打开代码”会按设置的编辑器准确跳转到 Java 文件与行列。代码协作支持：
 
@@ -55,7 +55,7 @@ pnpm dev
 
 软件持续监听项目文件，并以 80 ms 文件事件防抖和 120 ms 界面批处理增量更新源码索引。直接在 IDE 中新增、删除或修改 Subsystem、Goal/State enum、电机字段、Controller、Binding、Command 与 Auto 后，界面会移除旧推断并显示新结构，不必重新打开项目。
 
-从手写 Java 推断出的节点会显示“导入源码（只读结构）”。可以浏览层级、查看符号并准确打开代码，但名称、Goal、参数、父级和删除等结构化控件会禁用，避免产生“界面改了、手写代码却没改”的假同步。请在 IDE 中修改这类文件，FRC Framework 会自动重新索引。Framework 自己生成并带 Managed 区域的节点仍可完整编辑。如果外部编辑器修改了受管理文件，软件会要求选择重新载入、比较、保留外部版本或重新生成，不会静默覆盖；有待批准的 Diff 时，外部变化也不会清掉当前预览。
+从手写 Java 推断出的节点会显示“导入源码（只读结构）”。可以浏览层级、查看符号并准确打开代码，但名称、Goal、参数、父级和删除等结构化控件会禁用，避免产生“界面改了、手写代码却没改”的假同步。Config、Constants、Calculator 等辅助类仍可在源码树打开，但不会伪装成 Subsystem；旧版导入 YAML 中遗留的这类节点会在内存中安全修复，并在下一次确认修改时事务化写回。请在 IDE 中修改手写文件，FRC Framework 会自动重新索引。Framework 自己生成并带 Managed 区域的节点仍可完整编辑。如果外部编辑器修改了受管理文件，软件会要求选择重新载入、比较、保留外部版本或重新生成，不会静默覆盖；有待批准的 Diff 时，外部变化也不会清掉当前预览。
 
 ## 4. 电机、参数与预制模块
 

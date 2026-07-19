@@ -756,3 +756,7 @@
 - [x] **CONT-123 P1** 逻辑树为 Robot、Subsystem、Group、Mechanism、各类设备、Goal 与 Command 分配互不重复的 Material 图标，消除 Motor/Command 及不同设备共用图形造成的辨识混淆。
 - [x] **CONT-124 P0** 仓库采用 MIT License，根许可证、发布清单元数据与 README 许可说明保持一致。
 - [x] **CONT-125 P0** Subsystem、Group 与 Mechanism 创建改为名称/父级驱动的自动 Java 位置；Inspector 与拖拽移动同步迁移 runtime、Config、package、import、构造引用、YAML 和 docs，并保留 Managed 区域外队伍代码。
+- [x] **CONT-126 P0** 完整机器人验收扩展为创建、三层嵌套、手写代码、移动、重命名、Goal 增删、NT 写回/快照、删除、重开、Java 回读与再次 Gradle 编译的全生命周期闭环。
+- [x] **CONT-127 P0** Subsystem 重命名同步重构跨文件 Command 中的类标识符和组合字段；Java 词法替换避开字符串、字符、注释与文本块，并支持重复类名解除后其他字段名同步变化。
+- [x] **CONT-128 P0** Java 回读仅从机器人运行时基础包推断结构，排除 ext/test/generated 与基础设施访问器；旧源码导入 YAML 自动清除 Config/Constants/Calculator 假节点，生成代码和库方法不再重复计入 Command。
+- [x] **CONT-129 P1** Inspector 显示名称在 Java 标识符未定制时自动联动，并以中英文说明高级覆盖规则；生产 Electron E2E 覆盖名称驱动的文件迁移。

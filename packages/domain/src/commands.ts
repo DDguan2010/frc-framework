@@ -1,5 +1,6 @@
 import { planSubsystemRemoval } from './deletion.js';
-import { subsystemUsesAutomaticJavaLocation } from './java-location.js';
+import { subsystemJavaFieldName, subsystemUsesAutomaticJavaLocation } from './java-location.js';
+import { replaceJavaIdentifiers } from './java-refactor.js';
 import type { CollectionEntity, EntityCollection, EntityId, FrcProjectModel } from './model.js';
 
 export type DomainCommand =
@@ -185,11 +186,8 @@ function renameEntity(model: FrcProjectModel, command: RenameEntityCommand): Com
   if (command.collection !== 'subsystems') {
     return result(renamed, previous, [command.id], command.collection);
   }
-  return subsystemTreeResult(
-    model,
-    synchronizeAutomaticSubsystemLocations(model, renamed, command.id),
-    command.id,
-  );
+  const relocated = synchronizeAutomaticSubsystemLocations(model, renamed, command.id);
+  return subsystemTreeResult(model, synchronizeSubsystemReferences(model, relocated), command.id);
 }
 
 function updateEntity(model: FrcProjectModel, command: UpdateEntityCommand): CommandResult {
@@ -227,11 +225,8 @@ function updateEntity(model: FrcProjectModel, command: UpdateEntityCommand): Com
     target.collection === 'subsystems' &&
     ('parentId' in command.changes || 'symbol' in command.changes)
   ) {
-    return subsystemTreeResult(
-      model,
-      synchronizeAutomaticSubsystemLocations(model, updated, target.id),
-      target.id,
-    );
+    const relocated = synchronizeAutomaticSubsystemLocations(model, updated, target.id);
+    return subsystemTreeResult(model, synchronizeSubsystemReferences(model, relocated), target.id);
   }
   return result(
     updated,
@@ -239,6 +234,63 @@ function updateEntity(model: FrcProjectModel, command: UpdateEntityCommand): Com
     [target.id],
     target.collection,
   );
+}
+
+function synchronizeSubsystemReferences(
+  previous: FrcProjectModel,
+  next: FrcProjectModel,
+): FrcProjectModel {
+  const changes = new Map<
+    EntityId,
+    {
+      readonly oldField: string;
+      readonly newField: string;
+      readonly replacements: Map<string, string>;
+    }
+  >();
+  for (const oldSubsystem of previous.subsystems) {
+    const newSubsystem = next.subsystems.find((entry) => entry.id === oldSubsystem.id);
+    if (newSubsystem === undefined) continue;
+    const oldField = subsystemJavaFieldName(previous, oldSubsystem);
+    const newField = subsystemJavaFieldName(next, newSubsystem);
+    const replacements = new Map<string, string>();
+    if (oldSubsystem.symbol !== newSubsystem.symbol) {
+      replacements.set(oldSubsystem.symbol, newSubsystem.symbol);
+    }
+    if (oldField !== newField) replacements.set(oldField, newField);
+    if (replacements.size > 0) changes.set(oldSubsystem.id, { newField, oldField, replacements });
+  }
+  if (changes.size === 0) return next;
+
+  return {
+    ...next,
+    commands: next.commands.map((command) => {
+      if (command.codeExpression === undefined) return command;
+      const replacements = new Map<string, string>();
+      for (const requirementId of command.requirementIds) {
+        for (const [from, to] of changes.get(requirementId)?.replacements ?? []) {
+          const existing = replacements.get(from);
+          if (existing !== undefined && existing !== to) {
+            throw new Error(`Java identifier ${from} has more than one rename target.`);
+          }
+          replacements.set(from, to);
+        }
+      }
+      const codeExpression = replaceJavaIdentifiers(command.codeExpression, replacements);
+      return codeExpression === command.codeExpression ? command : { ...command, codeExpression };
+    }),
+    subsystems: next.subsystems.map((subsystem) => {
+      if (subsystem.dependencies === undefined) return subsystem;
+      let changed = false;
+      const dependencies = subsystem.dependencies.map((dependency) => {
+        const target = changes.get(dependency.targetSubsystemId);
+        if (target === undefined || dependency.fieldName !== target.oldField) return dependency;
+        changed = true;
+        return { ...dependency, fieldName: target.newField };
+      });
+      return changed ? { ...subsystem, dependencies } : subsystem;
+    }),
+  };
 }
 
 function synchronizeAutomaticSubsystemLocations(
@@ -289,12 +341,18 @@ function subsystemTreeResult(
   visit(rootId);
   return {
     inverse: {
-      changes: { subsystems: previous.subsystems },
+      changes: { commands: previous.commands, subsystems: previous.subsystems },
       target: { scope: 'model' },
       type: 'update',
     },
     model,
-    outputFiles: outputFilesForCollection('subsystems'),
+    outputFiles: [
+      'project.yaml',
+      'src/main/java/{package}/RobotContainer.java',
+      'src/main/java/{package}/commands/**',
+      'src/main/java/{package}/subsystems/**',
+      'docs/**',
+    ],
     touchedEntityIds,
   };
 }

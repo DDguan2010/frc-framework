@@ -2165,7 +2165,8 @@ export class AppShell extends LitElement {
           label=${t('structured.name')}
           .value=${selected.displayName}
           ?disabled=${imported}
-          @change=${(event: Event) => this.renameSelected(inputValue(event), selected.symbol)}
+          @change=${(event: Event) =>
+            this.renameSubsystemFromDisplayName(selected, inputValue(event))}
         ></md-outlined-text-field>
         <md-outlined-text-field
           label=${t('structured.symbol')}
@@ -2173,6 +2174,7 @@ export class AppShell extends LitElement {
           ?disabled=${imported}
           @change=${(event: Event) => this.renameSelected(selected.displayName, inputValue(event))}
         ></md-outlined-text-field>
+        <span class="muted">${t('structured.symbolHint')}</span>
         <strong>${t('structured.generatedLocation')}</strong>
         <span class="path">${runtimeFile}</span>
         <span class="muted"
@@ -5092,6 +5094,14 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       symbol,
       type: 'rename',
     });
+  }
+
+  private renameSubsystemFromDisplayName(subsystem: Subsystem, displayName: string): void {
+    const fallback = subsystem.kind === 'mechanism' ? 'Mechanism' : 'Subsystem';
+    const automaticSymbol = javaSymbol(subsystem.displayName, fallback);
+    const nextSymbol =
+      subsystem.symbol === automaticSymbol ? javaSymbol(displayName, fallback) : subsystem.symbol;
+    void this.renameSelected(displayName, nextSymbol);
   }
 
   private async moveSubsystemToParent(

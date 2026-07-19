@@ -4,9 +4,11 @@ import { DomainSession } from './history.js';
 import { planSubsystemRemoval, removeSubsystemState } from './deletion.js';
 import {
   automaticSubsystemJavaLocation,
+  subsystemJavaFieldName,
   subsystemJavaLocation,
   subsystemUsesAutomaticJavaLocation,
 } from './java-location.js';
+import { replaceJavaIdentifiers } from './java-refactor.js';
 import { createEmptyProject, createEntityId, PRODUCT_NAME, type Subsystem } from './model.js';
 import { validateModel } from './validation.js';
 
@@ -186,6 +188,100 @@ describe('domain model', () => {
     const model = { ...base, subsystems: [swerve] };
     expect(subsystemUsesAutomaticJavaLocation(model, swerve)).toBe(false);
     expect(subsystemJavaLocation(model, swerve).file).toBe(swerve.javaFile);
+  });
+
+  it('refactors generated Java references when subsystem symbols or qualified fields change', () => {
+    const base = fixture();
+    const intakeId = createEntityId();
+    const shooterId = createEntityId();
+    const intakePivotId = createEntityId();
+    const shooterPivotId = createEntityId();
+    const firstCommandId = createEntityId();
+    const secondCommandId = createEntityId();
+    const original = {
+      ...base,
+      commands: [
+        {
+          codeExpression:
+            'intakePivot.setGoalCommand(Pivot.Goal.ACTIVE) // Pivot intakePivot\n.thenRun(() -> System.out.println("Pivot intakePivot"))',
+          displayName: 'Move intake pivot',
+          id: firstCommandId,
+          kind: 'custom' as const,
+          requirementIds: [intakePivotId],
+          symbol: 'moveIntakePivot',
+        },
+        {
+          codeExpression: 'shooterPivot.setGoalCommand(Pivot.Goal.ACTIVE)',
+          displayName: 'Move shooter pivot',
+          id: secondCommandId,
+          kind: 'custom' as const,
+          requirementIds: [shooterPivotId],
+          symbol: 'moveShooterPivot',
+        },
+      ],
+      subsystems: [
+        { displayName: 'Intake', id: intakeId, kind: 'subsystem' as const, symbol: 'Intake' },
+        { displayName: 'Shooter', id: shooterId, kind: 'subsystem' as const, symbol: 'Shooter' },
+        {
+          displayName: 'Pivot',
+          id: intakePivotId,
+          kind: 'mechanism' as const,
+          parentId: intakeId,
+          symbol: 'Pivot',
+        },
+        {
+          displayName: 'Pivot',
+          id: shooterPivotId,
+          kind: 'mechanism' as const,
+          parentId: shooterId,
+          symbol: 'Pivot',
+        },
+        {
+          dependencies: [{ fieldName: 'intakePivot', targetSubsystemId: intakePivotId }],
+          displayName: 'Coordinator',
+          id: createEntityId(),
+          kind: 'group' as const,
+          symbol: 'Coordinator',
+        },
+      ],
+    };
+    expect(subsystemJavaFieldName(original, intakePivotId)).toBe('intakePivot');
+    expect(subsystemJavaFieldName(original, shooterPivotId)).toBe('shooterPivot');
+
+    const session = new DomainSession(original);
+    session.execute({
+      collection: 'subsystems',
+      displayName: 'Collector Pivot',
+      id: intakePivotId,
+      symbol: 'CollectorPivot',
+      type: 'rename',
+    });
+    expect(
+      session.model.commands.find((entry) => entry.id === firstCommandId)?.codeExpression,
+    ).toBe(
+      'collectorPivot.setGoalCommand(CollectorPivot.Goal.ACTIVE) // Pivot intakePivot\n.thenRun(() -> System.out.println("Pivot intakePivot"))',
+    );
+    expect(
+      session.model.commands.find((entry) => entry.id === secondCommandId)?.codeExpression,
+    ).toBe('pivot.setGoalCommand(Pivot.Goal.ACTIVE)');
+    expect(
+      session.model.subsystems.find((entry) => entry.symbol === 'Coordinator')?.dependencies,
+    ).toEqual([{ fieldName: 'collectorPivot', targetSubsystemId: intakePivotId }]);
+    session.undo();
+    expect(session.model.commands).toEqual(original.commands);
+    expect(session.model.subsystems).toEqual(original.subsystems);
+  });
+
+  it('replaces only complete Java identifiers outside literals and comments', () => {
+    expect(
+      replaceJavaIdentifiers(
+        'pivot + pivot2 + "pivot" + \'pivot\' /* pivot */ + value // pivot\npivot',
+        new Map([
+          ['pivot', 'armPivot'],
+          ['value', 'result'],
+        ]),
+      ),
+    ).toBe('armPivot + pivot2 + "pivot" + \'pivot\' /* pivot */ + result // pivot\narmPivot');
   });
 
   it('executes typed commands and keeps YAML/code impact metadata', () => {

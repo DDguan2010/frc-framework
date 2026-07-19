@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,13 +7,132 @@ import { generateStructuredFiles } from '@frc-framework/code-generator';
 import { createEmptyProject, createEntityId } from '@frc-framework/domain';
 import { instantiateCatalogDevice } from '@frc-framework/frc-catalog';
 import { instantiateCommonPreset, instantiateSwervePreset } from '@frc-framework/presets';
-import { stringifyProjectYaml } from '@frc-framework/project-io';
+import { parseProjectYaml, stringifyProjectYaml } from '@frc-framework/project-io';
 import { describe, expect, it } from 'vitest';
 
 import { ProjectService } from './project-service.js';
 import { SettingsStore } from './settings-store.js';
 
 describe('ProjectService structured edits', () => {
+  const referenceRobot = path.resolve('../2026-offseason-robot-10541');
+
+  it.runIf(existsSync(referenceRobot))(
+    'keeps obsolete imported helpers out of the real 10541 logic tree',
+    async () => {
+      const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-reference-state-'));
+      const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+      await store.load();
+      const service = new ProjectService(store, path.resolve('resources/base-template'));
+      try {
+        const opened = await service.open(referenceRobot);
+        const symbols = opened.model?.subsystems.map((entry) => entry.symbol) ?? [];
+        expect(symbols).toContain('ShootingSuperstructure');
+        expect(symbols).not.toContain('Configs');
+        expect(symbols).not.toContain('ShotCalculator');
+        expect(symbols.some((symbol) => symbol.endsWith('Config'))).toBe(false);
+      } finally {
+        await service.close();
+      }
+    },
+    30_000,
+  );
+
+  it('repairs legacy source imports without showing config classes as subsystems', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-legacy-source-'));
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-legacy-source-state-'));
+    const base = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'Legacy Source Robot',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    const configRootId = '11111111-1111-5111-8111-111111111111';
+    const configId = '22222222-2222-5222-8222-222222222222';
+    const intakeId = '33333333-3333-5333-8333-333333333333';
+    const configPath = 'src/main/java/frc/robot/subsystems/Configs/DriveConfig.java';
+    const intakePath = 'src/main/java/frc/robot/subsystems/Intake/IntakeSubsystem.java';
+    const legacy = {
+      ...base,
+      subsystems: [
+        {
+          behaviorMode: 'custom' as const,
+          displayName: 'Configs',
+          id: configRootId,
+          javaPackage: 'frc.robot.subsystems.Configs',
+          kind: 'subsystem' as const,
+          symbol: 'Configs',
+        },
+        {
+          displayName: 'DriveConfig',
+          id: configId,
+          javaFile: configPath,
+          javaPackage: 'frc.robot.subsystems.Configs',
+          kind: 'mechanism' as const,
+          parentId: configRootId,
+          symbol: 'DriveConfig',
+        },
+        {
+          behaviorMode: 'custom' as const,
+          displayName: 'IntakeSubsystem',
+          id: intakeId,
+          javaFile: intakePath,
+          javaPackage: 'frc.robot.subsystems.Intake',
+          kind: 'subsystem' as const,
+          symbol: 'IntakeSubsystem',
+        },
+      ],
+      unmanagedFiles: [],
+    };
+    await writeFile(path.join(root, 'project.yaml'), stringifyProjectYaml(legacy), 'utf8');
+    await mkdir(path.dirname(path.join(root, configPath)), { recursive: true });
+    await mkdir(path.dirname(path.join(root, intakePath)), { recursive: true });
+    const configSource = `package frc.robot.subsystems.Configs;
+public final class DriveConfig { public static final int MOTOR_ID = 20; }
+`;
+    await writeFile(path.join(root, configPath), configSource, 'utf8');
+    await writeFile(
+      path.join(root, intakePath),
+      `package frc.robot.subsystems.Intake;
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
+public final class IntakeSubsystem extends SubsystemBase {}
+`,
+      'utf8',
+    );
+
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      const opened = await service.open(root);
+      expect(opened.model?.subsystems.map((entry) => entry.symbol)).toContain('IntakeSubsystem');
+      expect(opened.model?.subsystems.some((entry) => entry.symbol.endsWith('Config'))).toBe(false);
+      expect(opened.model?.subsystems.some((entry) => entry.symbol === 'Configs')).toBe(false);
+
+      const preview = await service.previewCommand({
+        changes: { teamNumber: 6941 },
+        target: { scope: 'project' },
+        type: 'update',
+      });
+      expect(preview.problems).toEqual([]);
+      await service.applyPreview(preview.id);
+      expect(await readFile(path.join(root, configPath), 'utf8')).toBe(configSource);
+      const repaired = parseProjectYaml(await readFile(path.join(root, 'project.yaml'), 'utf8'));
+      expect(repaired.problems).toEqual([]);
+      expect(repaired.model?.subsystems.map((entry) => entry.symbol)).toEqual(['IntakeSubsystem']);
+      expect(repaired.model?.unmanagedFiles).toEqual(
+        expect.arrayContaining([configPath, intakePath]),
+      );
+
+      const reopened = await service.refresh();
+      expect(reopened.model?.subsystems.map((entry) => entry.symbol)).toContain('IntakeSubsystem');
+      expect(reopened.model?.subsystems.some((entry) => entry.symbol.endsWith('Config'))).toBe(
+        false,
+      );
+    } finally {
+      await service.close();
+    }
+  });
+
   it('moves automatic Java trees with their config and team-owned source intact', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-service-relocate-'));
     const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-relocate-state-'));

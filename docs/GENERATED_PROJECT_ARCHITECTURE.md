@@ -67,8 +67,16 @@ Run the complete generator acceptance scenario with:
 pnpm test:acceptance-robot
 ```
 
-It creates `output/acceptance-robot`, then formats and compiles a robot containing Swerve,
+It creates an isolated temporary project, then formats and compiles a robot containing Swerve,
 Limelight, nested intake and shooter mechanisms, followers, position zeroing, Beam Break, LED,
 NetworkTables parameters, two controllers, bindings, cross-subsystem commands, PathPlanner named
-commands, Auto, telemetry, docs, and `project.yaml`. It also re-indexes the generated Java and
-checks that Config files are not misidentified as subsystem tree nodes.
+commands, Auto, telemetry, docs, and `project.yaml`. A second lifecycle pass adds handwritten Java,
+moves and renames a three-level mechanism tree, adds/removes a Goal, writes live NT values and a
+snapshot, deletes a child, closes and reopens the project, re-indexes Java, and compiles again. Each
+run uses its own directory and cleans it afterward so interrupted or parallel validation cannot
+corrupt another run.
+
+Structured subsystem renames refactor the generated Java class and composition field identifiers in
+cross-subsystem Command expressions. String literals and comments are deliberately left unchanged.
+If team-owned code exists inside the class being renamed, FRC Framework stops and asks for an IDE
+rename instead of guessing across arbitrary handwritten Java.
