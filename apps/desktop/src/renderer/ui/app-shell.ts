@@ -42,6 +42,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { keyed } from 'lit/directives/keyed.js';
 
 import frameworkLogo from '../assets/frameworklogo.svg?url';
+import { autoCodeFile, commandCodeFile } from './code-location.js';
 import { projectTreeIcon } from './project-tree-icons.js';
 
 import type {
@@ -1899,6 +1900,7 @@ export class AppShell extends LitElement {
             : model.autos.map((auto) => {
                 const command = model.commands.find((entry) => entry.id === auto.commandId);
                 const imported = this.isUnmanagedPath(model, command?.javaFile);
+                const codeFile = autoCodeFile(model, auto);
                 return html`<div class="hierarchy-row">
                   <span
                     ><strong>${auto.displayName}</strong><br /><span class="muted"
@@ -1908,14 +1910,14 @@ export class AppShell extends LitElement {
                   <span class="row">
                     <span class="tree-badge">${auto.pathFiles.join(' · ') || 'Command'}</span>
                     ${auto.pathFiles[0] === undefined ? nothing : html`<md-icon-button aria-label=${t('auto.openPath')} @click=${() => this.openSourceFile(`src/main/deploy/${auto.pathFiles[0] ?? ''}`)}><md-icon>open_in_new</md-icon></md-icon-button>`}
+                    <md-icon-button
+                      aria-label=${t('inspector.openCode')}
+                      @click=${() => this.openSourceFile(codeFile)}
+                      ><md-icon>code</md-icon></md-icon-button
+                    >
                     ${
                       imported
-                        ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>
-                            <md-icon-button
-                              aria-label=${t('inspector.openCode')}
-                              @click=${() => this.openSourceFile(command?.javaFile ?? '')}
-                              ><md-icon>code</md-icon></md-icon-button
-                            >`
+                        ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>`
                         : html`<md-icon-button
                             aria-label=${t('tree.delete')}
                             @click=${() => this.removeCollectionEntity('autos', auto.id)}
@@ -4696,10 +4698,9 @@ export class AppShell extends LitElement {
     )
       return `src/main/java/${packagePath}/controls/OperatorInterface.java`;
     const command = model.commands.find((entry) => entry.id === entityId);
-    if (command !== undefined)
-      return command.javaFile ?? `src/main/java/${packagePath}/commands/RobotCommands.java`;
-    if (model.autos.some((entry) => entry.id === entityId))
-      return `src/main/java/${packagePath}/auto/AutoRoutines.java`;
+    if (command !== undefined) return commandCodeFile(model, command);
+    const auto = model.autos.find((entry) => entry.id === entityId);
+    if (auto !== undefined) return autoCodeFile(model, auto);
     return undefined;
   }
 

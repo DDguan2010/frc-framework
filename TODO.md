@@ -761,3 +761,4 @@
 - [x] **CONT-128 P0** Java 回读仅从机器人运行时基础包推断结构，排除 ext/test/generated 与基础设施访问器；旧源码导入 YAML 自动清除 Config/Constants/Calculator 假节点，生成代码和库方法不再重复计入 Command。
 - [x] **CONT-129 P1** Inspector 显示名称在 Java 标识符未定制时自动联动，并以中英文说明高级覆盖规则；生产 Electron E2E 覆盖名称驱动的文件迁移。
 - [x] **CONT-130 P0** 源码覆盖层只将真正的手写/显式保留文件标记为只读；全部预制模块在重开后仍保持结构可编辑，并由覆盖 Swerve、Limelight、Velocity、Position、Beam-break 与 LED 的完整机器人验收防止回归。
+- [x] **CONT-131 P1** Auto 工作区始终提供“打开代码”：生成 Auto 跳转到关联的 RobotCommands 工厂，手写 Auto 跳转到实际 Java 文件，无关联 Command 时回退 AutoRoutines；PathPlanner 资源保留独立入口。

@@ -274,6 +274,111 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect(
       page.getByRole('main').getByRole('strong').filter({ hasText: 'centerAuto()' }),
     ).toBeVisible();
+    const generatedAutoCommandId = '11111111-1111-4111-8111-111111111111';
+    const generatedAutoId = '22222222-2222-4222-8222-222222222222';
+    await page.locator('frc-framework-app').evaluate(
+      async (element, ids) => {
+        const api = (
+          window as Window & {
+            framework: {
+              project: {
+                applyPreview(id: string): Promise<unknown>;
+                previewCommand(command: unknown): Promise<{ id: string }>;
+                refresh(): Promise<unknown>;
+              };
+            };
+          }
+        ).framework;
+        const preview = await api.project.previewCommand({
+          commands: [
+            {
+              collection: 'commands',
+              entity: {
+                displayName: 'Generated Auto Command',
+                id: ids.commandId,
+                kind: 'custom',
+                requirementIds: [],
+                symbol: 'generatedAutoCommand',
+              },
+              type: 'add',
+            },
+            {
+              collection: 'autos',
+              entity: {
+                commandId: ids.autoCommandId,
+                displayName: 'Generated Auto',
+                id: ids.autoId,
+                pathFiles: ['pathplanner/paths/Center.path'],
+                symbol: 'GeneratedAuto',
+              },
+              type: 'add',
+            },
+          ],
+          label: 'Add generated Auto E2E fixture',
+          type: 'batch',
+        });
+        await api.project.applyPreview(preview.id);
+        const shell = element as HTMLElement & {
+          project?: unknown;
+          updateComplete: Promise<unknown>;
+        };
+        shell.project = await api.project.refresh();
+        await shell.updateComplete;
+      },
+      {
+        autoCommandId: generatedAutoCommandId,
+        autoId: generatedAutoId,
+        commandId: generatedAutoCommandId,
+      },
+    );
+    const generatedAutoRow = page
+      .getByRole('main')
+      .locator('.hierarchy-row')
+      .filter({ hasText: 'Generated Auto' });
+    await expect(generatedAutoRow).toBeVisible();
+    await page.locator('frc-framework-app').evaluate((element) => {
+      const shell = element as HTMLElement & {
+        e2eOpenedSource?: string;
+        e2eOriginalOpenSourceFile?: (path: string) => Promise<void>;
+        openSourceFile: (path: string) => Promise<void>;
+      };
+      shell.e2eOriginalOpenSourceFile = shell.openSourceFile;
+      shell.openSourceFile = async (file) => {
+        shell.e2eOpenedSource = file;
+      };
+    });
+    await clickMaterialButton(
+      page,
+      generatedAutoRow.getByRole('button', { name: i18n.t('inspector.openCode') }),
+    );
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          return (element as HTMLElement & { e2eOpenedSource?: string }).e2eOpenedSource;
+        }),
+      )
+      .toBe('src/main/java/frc/robot/e2e/commands/RobotCommands.java');
+    await clickMaterialButton(
+      page,
+      generatedAutoRow.getByRole('button', { name: i18n.t('auto.openPath') }),
+    );
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          return (element as HTMLElement & { e2eOpenedSource?: string }).e2eOpenedSource;
+        }),
+      )
+      .toBe('src/main/deploy/pathplanner/paths/Center.path');
+    await page.locator('frc-framework-app').evaluate((element) => {
+      const shell = element as HTMLElement & {
+        e2eOriginalOpenSourceFile?: (path: string) => Promise<void>;
+        openSourceFile: (path: string) => Promise<void>;
+      };
+      if (shell.e2eOriginalOpenSourceFile !== undefined) {
+        shell.openSourceFile = shell.e2eOriginalOpenSourceFile;
+        delete shell.e2eOriginalOpenSourceFile;
+      }
+    });
     await waitForExternalSync(page);
     await expect
       .poll(() =>
