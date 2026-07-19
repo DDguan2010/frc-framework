@@ -753,3 +753,4 @@
 - [x] **CONT-120 P1** 逻辑树/源码树切换时清除跨视图筛选；新增 Mechanism、Device、Goal 和嵌套预制后自动展开完整父链并选中新实体。
 - [x] **CONT-121 P0** 以 10541 完整项目、手写源码实时变更、Typed Source Inventory、冷缓存开发启动、Electron 打包 E2E 和完整验收机器人形成兼容性回归闭环。
 - [x] **CONT-122 P1** 左侧导航/项目树与右侧 Inspector 改为按窗口可用空间动态拉伸，最大宽度扩展到 720/840 px，中等宽度窗口保留拖拽能力，命中区域扩大并在缩放窗口后恢复用户偏好宽度。
+- [x] **CONT-123 P1** 逻辑树为 Robot、Subsystem、Group、Mechanism、各类设备、Goal 与 Command 分配互不重复的 Material 图标，消除 Motor/Command 及不同设备共用图形造成的辨识混淆。

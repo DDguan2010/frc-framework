@@ -41,6 +41,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { keyed } from 'lit/directives/keyed.js';
 
 import frameworkLogo from '../assets/frameworklogo.svg?url';
+import { projectTreeIcon } from './project-tree-icons.js';
 
 import type {
   AppSettings,
@@ -1045,7 +1046,7 @@ export class AppShell extends LitElement {
       this.treeRoot(
         model.robot.id,
         model.robot.displayName,
-        'smart_toy',
+        projectTreeIcon('robot'),
         searching || this.expandedEntityIds.has(model.robot.id),
       ),
     );
@@ -1067,37 +1068,25 @@ export class AppShell extends LitElement {
           commands.length > 0 ||
           (node.stateMachine?.states.length ?? 0) > 0;
         if (query.length === 0 || node.displayName.toLowerCase().includes(query)) {
-          rows.push(
-            this.treeNode(
-              node,
-              depth,
-              node.kind === 'mechanism' ? 'precision_manufacturing' : 'account_tree',
-              hasChildren,
-            ),
-          );
+          rows.push(this.treeNode(node, depth, projectTreeIcon(node.kind), hasChildren));
         }
         if (!searching && hasChildren && !this.expandedEntityIds.has(node.id)) continue;
         visit(node.id, depth + 1);
         for (const device of devices) {
           if (query.length === 0 || device.displayName.toLowerCase().includes(query)) {
-            rows.push(
-              this.treeNode(
-                device,
-                depth + 1,
-                device.kind === 'motor' ? 'electric_bolt' : 'memory',
-                false,
-              ),
-            );
+            rows.push(this.treeNode(device, depth + 1, projectTreeIcon(device.kind), false));
           }
         }
         for (const goal of node.stateMachine?.states ?? []) {
           if (query.length === 0 || goal.displayName.toLowerCase().includes(query)) {
-            rows.push(this.treeLeaf(goal.displayName, 'goal', depth + 1, 'flag'));
+            rows.push(this.treeLeaf(goal.displayName, 'goal', depth + 1, projectTreeIcon('goal')));
           }
         }
         for (const command of commands) {
           if (query.length === 0 || command.displayName.toLowerCase().includes(query)) {
-            rows.push(this.treeLeaf(command.displayName, 'command', depth + 1, 'bolt'));
+            rows.push(
+              this.treeLeaf(command.displayName, 'command', depth + 1, projectTreeIcon('command')),
+            );
           }
         }
       }
@@ -1105,7 +1094,7 @@ export class AppShell extends LitElement {
     visit(undefined, 1);
     for (const command of model.commands.filter((entry) => entry.requirementIds.length === 0)) {
       if (query.length === 0 || command.displayName.toLowerCase().includes(query)) {
-        rows.push(this.treeLeaf(command.displayName, 'command', 1, 'bolt'));
+        rows.push(this.treeLeaf(command.displayName, 'command', 1, projectTreeIcon('command')));
       }
     }
     return rows;

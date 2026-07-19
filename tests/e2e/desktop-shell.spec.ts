@@ -253,6 +253,9 @@ test('production shell is secure, accessible, and interactive', async () => {
     ).toBeVisible({
       timeout: 15_000,
     });
+    const importedCommandTreeItem = page.getByRole('treeitem', { name: 'flash() command' });
+    await expect(importedCommandTreeItem).toBeVisible();
+    await expect(importedCommandTreeItem.locator('md-icon').nth(1)).toHaveText('play_arrow');
     const importedCommandRow = page
       .getByRole('main')
       .locator('.hierarchy-row')
@@ -500,6 +503,8 @@ test('production shell is secure, accessible, and interactive', async () => {
       await rollerSubsystem.evaluate((element) => (element as HTMLElement).click());
     }
     await expect(rollerMotor).toBeVisible();
+    await expect(rollerMotor.locator('md-icon').nth(1)).toHaveText('electric_bolt');
+    expect(await rollerMotor.locator('md-icon').nth(1).textContent()).not.toBe('play_arrow');
     const rollerMotorId = await rollerMotor.getAttribute('data-entity-id');
     expect(rollerMotorId).not.toBeNull();
     await rollerMotor.evaluate((element) => (element as HTMLElement).click());
