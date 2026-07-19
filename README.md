@@ -86,9 +86,9 @@ EXE、macOS DMG、Linux DEB/RPM 安装包；便携包和审计文件保留在 Ac
 感谢 FRC Team 6941 IronPulse Robotics（`ironpulse6941`）分享其机器人代码架构和工程经验。
 FRC Framework 的 `lib.ironpulse` 包组织与部分 API 概念参考了该团队的工作；Base 中的兼容实现为本项目独立编写，并未整包复制上游仓库。
 
-## 状态与版权
+## 状态与许可证
 
 当前仍为预发布版本。已知限制见 [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)，恢复流程见
 [docs/RECOVERY.md](docs/RECOVERY.md)。
 
-Copyright © 2026 0.2Studio. 本仓库目前未声明开源许可证；除非版权所有者另行授权，不自动授予复制、修改或再分发权利。
+Copyright © 2026 0.2Studio。本项目采用 [MIT License](LICENSE)，允许使用、复制、修改、合并、发布和分发，但须保留版权与许可声明。

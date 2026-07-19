@@ -5,6 +5,7 @@
   "type": "module",
   "description": "A structured desktop workspace for readable FRC robot projects.",
   "author": "0.2Studio",
+  "license": "MIT",
   "homepage": "https://github.com/DDguan2010/frc-framework#readme",
   "repository": {
     "type": "git",

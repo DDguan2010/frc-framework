@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Structured FRC robot project workspace",
   "author": "0.2Studio",
+  "license": "MIT",
   "homepage": "https://github.com/DDguan2010/frc-framework",
   "repository": {
     "type": "git",
