@@ -21,6 +21,12 @@ code generator, not a runtime dependency.
 - `tuning/TuningParameters.java` is the typed NetworkTables value registry generated from
   `project.yaml`.
 
+Ordinary managed node locations are deterministic. The project package, complete parent chain,
+and Java symbol produce `subsystems/<parent>/<child>/<Child>.java`; users select a parent and name
+instead of entering package strings. Reparenting relocates the runtime and adjacent Config source,
+refreshes imports and composition, and preserves team code outside managed regions. Imported source
+and fixed-layout presets retain their explicit locations.
+
 This follows the same broad boundary used in the 10541 reference robot: static hardware and tuning
 construction are separated from runtime subsystem/superstructure behavior. FRC Framework does not
 generate a separate Commands class for every small mechanism. Local commands stay beside their

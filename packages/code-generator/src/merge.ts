@@ -4,20 +4,25 @@ const userSupplement =
   /(<!-- frc-framework:user-supplement:start -->\r?\n)[\s\S]*?(<!-- frc-framework:user-supplement:end -->)/gu;
 const importLine = /^import\s+(?:static\s+)?[\w.*]+;\s*$/gmu;
 
-/** Preserves ordinary Java outside managed blocks and unions generated imports. */
-export function mergeGeneratedJava(existing: string | undefined, generated: string): string {
+/** Preserves ordinary Java outside managed blocks and refreshes generated imports. */
+export function mergeGeneratedJava(
+  existing: string | undefined,
+  generated: string,
+  previousGenerated?: string,
+): string {
   if (existing === undefined) return generated;
+  const preparedExisting = removePreviousGeneratedImports(existing, previousGenerated);
   const generatedBlocks = [...generated.matchAll(managedBlock)];
-  const existingBlocks = [...existing.matchAll(managedBlock)];
+  const existingBlocks = [...preparedExisting.matchAll(managedBlock)];
   // Some preset implementations are generated as complete Java files rather
   // than mixed managed/custom regions. An unchanged file is already the exact
   // candidate we want and must not block unrelated structured edits.
   if (
     generatedBlocks.length === 0 &&
     existingBlocks.length === 0 &&
-    sameJavaTokens(existing, generated)
+    sameJavaTokens(preparedExisting, generated)
   ) {
-    return existing;
+    return preparedExisting;
   }
   if (generatedBlocks.length === 0 || existingBlocks.length !== generatedBlocks.length) {
     throw new Error(
@@ -25,7 +30,10 @@ export function mergeGeneratedJava(existing: string | undefined, generated: stri
     );
   }
   let blockIndex = 0;
-  const merged = existing.replace(managedBlock, () => generatedBlocks[blockIndex++]?.[0] ?? '');
+  const merged = preparedExisting.replace(
+    managedBlock,
+    () => generatedBlocks[blockIndex++]?.[0] ?? '',
+  );
   return mergeImports(merged, generated);
 }
 
@@ -56,6 +64,15 @@ function mergeImports(existing: string, generated: string): string {
   const packageEnd = withoutImports.indexOf(';');
   if (packageEnd < 0) throw new Error('Java source does not contain a package declaration.');
   return `${withoutImports.slice(0, packageEnd + 1)}\n\n${imports.join('\n')}\n${withoutImports.slice(packageEnd + 1).replace(/^\s*/u, '\n')}`;
+}
+
+function removePreviousGeneratedImports(existing: string, previousGenerated: string | undefined) {
+  if (previousGenerated === undefined) return existing;
+  const generatedImports = new Set(
+    [...previousGenerated.matchAll(importLine)].map((match) => match[0].trim()),
+  );
+  if (generatedImports.size === 0) return existing;
+  return existing.replace(importLine, (line) => (generatedImports.has(line.trim()) ? '' : line));
 }
 
 function normalizeJavaWhitespace(source: string): string {

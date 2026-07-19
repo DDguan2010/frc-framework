@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { generateStructuredFiles } from '@frc-framework/code-generator';
 import { createEmptyProject, createEntityId } from '@frc-framework/domain';
+import { instantiateCatalogDevice } from '@frc-framework/frc-catalog';
 import { instantiateCommonPreset, instantiateSwervePreset } from '@frc-framework/presets';
 import { stringifyProjectYaml } from '@frc-framework/project-io';
 import { describe, expect, it } from 'vitest';
@@ -12,6 +13,121 @@ import { ProjectService } from './project-service.js';
 import { SettingsStore } from './settings-store.js';
 
 describe('ProjectService structured edits', () => {
+  it('moves automatic Java trees with their config and team-owned source intact', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-service-relocate-'));
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-relocate-state-'));
+    const intakeId = createEntityId();
+    const shooterId = createEntityId();
+    const pivotId = createEntityId();
+    const base = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'Relocate Robot',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    const pivotMotor = instantiateCatalogDevice({
+      canId: 20,
+      componentId: 'ironpulse.talonfx-primary',
+      displayName: 'Pivot Motor',
+      parentId: pivotId,
+    });
+    const model = {
+      ...base,
+      devices: [pivotMotor],
+      subsystems: [
+        {
+          displayName: 'Intake',
+          id: intakeId,
+          javaFile: 'src/main/java/frc/robot/subsystems/intake/Intake.java',
+          javaPackage: 'frc.robot.subsystems.intake',
+          kind: 'subsystem' as const,
+          symbol: 'Intake',
+        },
+        {
+          displayName: 'Pivot',
+          id: pivotId,
+          javaFile: 'src/main/java/frc/robot/subsystems/intake/pivot/Pivot.java',
+          javaPackage: 'frc.robot.subsystems.intake.pivot',
+          kind: 'mechanism' as const,
+          parentId: intakeId,
+          symbol: 'Pivot',
+        },
+        {
+          displayName: 'Shooter',
+          id: shooterId,
+          kind: 'subsystem' as const,
+          symbol: 'Shooter',
+        },
+      ],
+    };
+    await writeStructuredFixture(root, model);
+    const oldRuntime = 'src/main/java/frc/robot/subsystems/intake/pivot/Pivot.java';
+    const oldConfig = 'src/main/java/frc/robot/subsystems/intake/pivot/PivotConfig.java';
+    const newRuntime = 'src/main/java/frc/robot/subsystems/shooter/pivot/Pivot.java';
+    const newConfig = 'src/main/java/frc/robot/subsystems/shooter/pivot/PivotConfig.java';
+    const oldSource = await readFile(path.join(root, oldRuntime), 'utf8');
+    await writeFile(
+      path.join(root, oldRuntime),
+      oldSource
+        .replace(
+          'package frc.robot.subsystems.intake.pivot;',
+          'package frc.robot.subsystems.intake.pivot;\n\nimport java.util.Optional;',
+        )
+        .replace(
+          /\n\}\s*$/u,
+          '\n    public Optional<String> teamOwnedStatus() { return Optional.empty(); }\n}\n',
+        ),
+      'utf8',
+    );
+
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      await service.open(root);
+      const preview = await service.previewCommand({
+        changes: { parentId: shooterId },
+        target: { collection: 'subsystems', id: pivotId, scope: 'entity' },
+        type: 'update',
+      });
+      expect(preview.problems).toEqual([]);
+      expect(preview.changes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: 'deleted', path: oldRuntime }),
+          expect.objectContaining({ kind: 'deleted', path: oldConfig }),
+          expect.objectContaining({ kind: 'added', path: newRuntime }),
+          expect.objectContaining({ kind: 'added', path: newConfig }),
+        ]),
+      );
+      const applied = await service.applyPreview(preview.id);
+      const moved = applied.model?.subsystems.find((entry) => entry.id === pivotId);
+      expect(moved?.parentId).toBe(shooterId);
+      expect(moved).not.toHaveProperty('javaFile');
+      expect(moved).not.toHaveProperty('javaPackage');
+      const relocatedSource = await readFile(path.join(root, newRuntime), 'utf8');
+      expect(relocatedSource).toContain('package frc.robot.subsystems.shooter.pivot;');
+      expect(relocatedSource).toContain('import java.util.Optional;');
+      expect(relocatedSource).toContain('teamOwnedStatus()');
+      expect(await readFile(path.join(root, newConfig), 'utf8')).toContain('class PivotConfig');
+      await expect(readFile(path.join(root, oldRuntime), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(readFile(path.join(root, oldConfig), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(
+        service.previewCommand({
+          collection: 'subsystems',
+          id: pivotId,
+          symbol: 'ShooterPivot',
+          type: 'rename',
+        }),
+      ).rejects.toThrow('team-owned code');
+    } finally {
+      await service.close();
+    }
+  });
+
   it('keeps structured edits working when unchanged full-file preset Java already exists', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-service-preset-'));
     const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-preset-state-'));

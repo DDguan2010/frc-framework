@@ -34,6 +34,37 @@ public final class Example {
     expect(merged).toContain('import java.util.Map;');
   });
 
+  it('removes obsolete generated imports while preserving team imports', () => {
+    const previousGenerated = `package frc.robot;
+
+import frc.robot.subsystems.intake.Pivot;
+
+public final class Example {
+    // <frc-framework:managed>
+    private Pivot pivot;
+    // </frc-framework:managed>
+}
+`;
+    const existing = previousGenerated.replace(
+      'import frc.robot.subsystems.intake.Pivot;',
+      'import frc.robot.subsystems.intake.Pivot;\nimport java.util.Optional;',
+    );
+    const generated = `package frc.robot;
+
+import frc.robot.subsystems.shooter.Pivot;
+
+public final class Example {
+    // <frc-framework:managed>
+    private Pivot pivot;
+    // </frc-framework:managed>
+}
+`;
+    const merged = mergeGeneratedJava(existing, generated, previousGenerated);
+    expect(merged).toContain('import frc.robot.subsystems.shooter.Pivot;');
+    expect(merged).not.toContain('import frc.robot.subsystems.intake.Pivot;');
+    expect(merged).toContain('import java.util.Optional;');
+  });
+
   it('preserves user documentation supplements', () => {
     const existing = `Generated old\n<!-- frc-framework:user-supplement:start -->\nTeam note\n<!-- frc-framework:user-supplement:end -->\n`;
     const generated = `Generated new\n<!-- frc-framework:user-supplement:start -->\nPlaceholder\n<!-- frc-framework:user-supplement:end -->\n`;

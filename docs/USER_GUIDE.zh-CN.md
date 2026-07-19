@@ -38,11 +38,13 @@ pnpm dev
 - “逻辑”：Robot → Subsystem/Mechanism → Device 的结构；
 - “源码”：按真实文件夹展开 Java、Kotlin、C/C++、Gradle、PathPlanner、JSON/YAML/TOML/XML、脚本、文档、AdvantageScope 模型和日志等文件，并显示格式、大小、所有权、解析问题与外部修改状态。二进制文件只允许交给关联程序打开，不会被当作文本解析。
 
-在“项目”页可添加 Subsystem、Mechanism、Device 和 Goal。选择节点后，在右侧 Inspector 修改名称、Java symbol、CAN ID、总线、参数、仿真和 NT 发布选项。
+在“项目”页可添加 Subsystem、Group、Mechanism、Device 和 Goal。创建节点时只需选择父级并填写名称，软件会根据 `项目基础包 → subsystems → 完整父子层级 → Java symbol` 自动生成 package 与文件路径，并在写入前显示位置预览，不需要手工输入 Java 包名。选择节点后，可在右侧 Inspector 修改名称、Java symbol、所属父级、CAN ID、总线、参数、仿真和 NT 发布选项。
 
 这里的 **Mechanism（机构）** 是 Subsystem 内部的物理功能单元。例如 `Shooter` 可包含 `Upper` 和 `Lower`，`Intake` 可包含 `IntakePivot`。每个树节点在任意深度都有自己的 Java 文件，只拥有直接设备、Goal 和局部命令；父节点通过构造器接收直接子节点。Mechanism 不必单独参与 WPILib 调度，但它不再只是一个没有代码位置的分组。
 
 选中任意 Subsystem、Mechanism 或更深节点后点击“代码”，会打开该节点自己的 Java 文件。例如 `Intake → IntakePivot` 默认对应 `subsystems/intake/Intake.java` 与 `subsystems/intake/intakePivot/IntakePivot.java`，不会再统一跳到 `Intake.java`。
+
+拖拽节点或在 Inspector 修改“所属父级”时，普通受管理节点的 Java、相邻 Config、package、import、构造注入、`project.yaml` 和 docs 会一起迁移；Managed 区域外的队伍方法和用户 import 会保留。若同时修改 Java 类名且文件含有无法安全重写的队伍代码，软件会停止并要求在 IDE 中处理，不会静默丢失。手写只读节点以及 Swerve/Limelight 等固定入口预制保持原位置并禁用结构迁移。
 
 “打开代码”会按设置的编辑器准确跳转到 Java 文件与行列。代码协作支持：
 

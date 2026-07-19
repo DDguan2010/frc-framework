@@ -1,4 +1,5 @@
 import { planSubsystemRemoval } from './deletion.js';
+import { subsystemUsesAutomaticJavaLocation } from './java-location.js';
 import type { CollectionEntity, EntityCollection, EntityId, FrcProjectModel } from './model.js';
 
 export type DomainCommand =
@@ -180,11 +181,14 @@ function renameEntity(model: FrcProjectModel, command: RenameEntityCommand): Com
     ...(command.displayName === undefined ? {} : { displayName: command.displayName }),
     ...(command.symbol === undefined ? {} : { symbol: command.symbol }),
   };
-  return result(
-    withCollection(model, command.collection, collection),
-    previous,
-    [command.id],
-    command.collection,
+  const renamed = withCollection(model, command.collection, collection);
+  if (command.collection !== 'subsystems') {
+    return result(renamed, previous, [command.id], command.collection);
+  }
+  return subsystemTreeResult(
+    model,
+    synchronizeAutomaticSubsystemLocations(model, renamed, command.id),
+    command.id,
   );
 }
 
@@ -218,12 +222,81 @@ function updateEntity(model: FrcProjectModel, command: UpdateEntityCommand): Com
   }
   const previous = pickValues(entity, Object.keys(command.changes));
   collection[index] = { ...entity, ...structuredClone(command.changes) };
+  const updated = withCollection(model, target.collection, collection);
+  if (
+    target.collection === 'subsystems' &&
+    ('parentId' in command.changes || 'symbol' in command.changes)
+  ) {
+    return subsystemTreeResult(
+      model,
+      synchronizeAutomaticSubsystemLocations(model, updated, target.id),
+      target.id,
+    );
+  }
   return result(
-    withCollection(model, target.collection, collection),
+    updated,
     { changes: previous, target, type: 'update' },
     [target.id],
     target.collection,
   );
+}
+
+function synchronizeAutomaticSubsystemLocations(
+  previous: FrcProjectModel,
+  next: FrcProjectModel,
+  rootId: EntityId,
+): FrcProjectModel {
+  const automaticIds = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    const subsystem = previous.subsystems.find((entry) => entry.id === id);
+    if (subsystem === undefined) return;
+    if (subsystemUsesAutomaticJavaLocation(previous, subsystem)) automaticIds.add(id);
+    for (const child of previous.subsystems.filter((entry) => entry.parentId === id)) {
+      visit(child.id);
+    }
+  };
+  visit(rootId);
+  return {
+    ...next,
+    subsystems: next.subsystems.map((subsystem) => {
+      if (!automaticIds.has(subsystem.id)) return subsystem;
+      const automatic = { ...subsystem } as {
+        -readonly [Key in keyof typeof subsystem]: (typeof subsystem)[Key];
+      };
+      delete automatic.javaFile;
+      delete automatic.javaPackage;
+      return automatic;
+    }),
+  };
+}
+
+function subsystemTreeResult(
+  previous: FrcProjectModel,
+  model: FrcProjectModel,
+  rootId: EntityId,
+): CommandResult {
+  const touchedEntityIds: EntityId[] = [];
+  const visited = new Set<EntityId>();
+  const visit = (id: EntityId): void => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    touchedEntityIds.push(id);
+    for (const child of model.subsystems.filter((entry) => entry.parentId === id)) visit(child.id);
+  };
+  visit(rootId);
+  return {
+    inverse: {
+      changes: { subsystems: previous.subsystems },
+      target: { scope: 'model' },
+      type: 'update',
+    },
+    model,
+    outputFiles: outputFilesForCollection('subsystems'),
+    touchedEntityIds,
+  };
 }
 
 function executeBatch(model: FrcProjectModel, command: BatchCommand): CommandResult {

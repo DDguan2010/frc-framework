@@ -22,6 +22,40 @@ export function subsystemJavaLocation(
   return resolveLocation(model, subsystem, new Set());
 }
 
+/**
+ * Resolves the location implied by the node's symbol and parent, ignoring an explicit location on
+ * the node itself. An explicit location on an ancestor is still respected so ordinary children of
+ * fixed-layout presets (for example Swerve) remain underneath that preset.
+ */
+export function automaticSubsystemJavaLocation(
+  model: FrcProjectModel,
+  subsystemOrId: Subsystem | string,
+): SubsystemJavaLocation {
+  const subsystem =
+    typeof subsystemOrId === 'string'
+      ? model.subsystems.find((entry) => entry.id === subsystemOrId)
+      : subsystemOrId;
+  if (subsystem === undefined) throw new Error(`Subsystem ${subsystemOrId} does not exist.`);
+  return resolveAutomaticLocation(model, subsystem, new Set());
+}
+
+/** True when removing javaFile/javaPackage preserves the node's current effective location. */
+export function subsystemUsesAutomaticJavaLocation(
+  model: FrcProjectModel,
+  subsystemOrId: Subsystem | string,
+): boolean {
+  const subsystem =
+    typeof subsystemOrId === 'string'
+      ? model.subsystems.find((entry) => entry.id === subsystemOrId)
+      : subsystemOrId;
+  if (subsystem === undefined) throw new Error(`Subsystem ${subsystemOrId} does not exist.`);
+  const automatic = automaticSubsystemJavaLocation(model, subsystem);
+  return (
+    (subsystem.javaPackage === undefined || subsystem.javaPackage === automatic.packageName) &&
+    (subsystem.javaFile === undefined || normalizePath(subsystem.javaFile) === automatic.file)
+  );
+}
+
 export function rootSubsystem(
   model: FrcProjectModel,
   subsystemOrId: Subsystem | string,
@@ -71,11 +105,38 @@ function resolveLocation(
   };
 }
 
+function resolveAutomaticLocation(
+  model: FrcProjectModel,
+  subsystem: Subsystem,
+  visited: ReadonlySet<string>,
+): SubsystemJavaLocation {
+  if (visited.has(subsystem.id)) throw new Error('Subsystem hierarchy contains a cycle.');
+  const nextVisited = new Set(visited).add(subsystem.id);
+  let packageName: string;
+  if (subsystem.parentId === undefined) {
+    packageName = `${model.project.javaPackage}.subsystems.${lowerFirst(subsystem.symbol)}`;
+  } else {
+    const parent = model.subsystems.find((entry) => entry.id === subsystem.parentId);
+    if (parent === undefined)
+      throw new Error(`Subsystem parent ${subsystem.parentId} does not exist.`);
+    packageName = `${resolveLocation(model, parent, nextVisited).packageName}.${lowerFirst(subsystem.symbol)}`;
+  }
+  return {
+    className: subsystem.symbol,
+    file: `src/main/java/${packageName.replace(/\./gu, '/')}/${subsystem.symbol}.java`,
+    packageName,
+  };
+}
+
 function packageFromJavaFile(file: string | undefined): string | undefined {
   if (file === undefined) return undefined;
-  const normalized = file.replace(/\\/gu, '/');
+  const normalized = normalizePath(file);
   const match = /^src\/main\/java\/(.+)\/[^/]+\.java$/u.exec(normalized);
   return match?.[1]?.replace(/\//gu, '.');
+}
+
+function normalizePath(file: string): string {
+  return file.replace(/\\/gu, '/');
 }
 
 function lowerFirst(value: string): string {

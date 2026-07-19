@@ -541,6 +541,10 @@ export class ProjectService {
     const previousGenerated =
       previousModel === undefined ? new Map() : generateStructuredFiles(previousModel);
     const nextGenerated = generateStructuredFiles(model);
+    const relocations =
+      previousModel === undefined
+        ? new Map<string, GeneratedJavaRelocation>()
+        : generatedJavaRelocations(previousModel, model, previousGenerated, nextGenerated);
     generated.set('project.yaml', stringifyProjectYaml(model));
     for (const [filePath, content] of nextGenerated) {
       if (model.unmanagedFiles.includes(filePath)) continue;
@@ -550,6 +554,7 @@ export class ProjectService {
       }
       const existing = await readOptional(path.join(root, filePath));
       const previous = previousGenerated.get(filePath);
+      const relocation = relocations.get(filePath);
       const forced = forceGeneratedPaths.has(filePath);
       // Do not touch a generated path when this command did not change its
       // expected output. This isolates structured edits from stale
@@ -558,20 +563,29 @@ export class ProjectService {
       // explicit Regenerate action instead of being mixed into another edit.
       if (!forced && !includeUnchangedPaths.has(filePath) && previous === content) continue;
       try {
-        generated.set(
-          filePath,
-          forced
-            ? content
-            : typeof previous === 'string' &&
-                (existing === previous ||
-                  (filePath.endsWith('.java') && sameGeneratedJava(existing, previous)))
-              ? content
-              : filePath.endsWith('.java')
-                ? mergeGeneratedJava(existing, content)
-                : filePath.endsWith('.md')
-                  ? mergeGeneratedDocument(existing, content)
-                  : content,
-        );
+        let candidate: ProjectFileContent = content;
+        if (!forced) {
+          if (filePath.endsWith('.java') && relocation !== undefined && existing === undefined) {
+            const relocatedExisting = await readOptional(path.join(root, relocation.previousPath));
+            const relocatedGenerated = previousGenerated.get(relocation.previousPath);
+            candidate = relocatedJava(relocatedExisting, relocatedGenerated, content, relocation);
+          } else if (
+            typeof previous === 'string' &&
+            (existing === previous ||
+              (filePath.endsWith('.java') && sameGeneratedJava(existing, previous)))
+          ) {
+            candidate = content;
+          } else if (filePath.endsWith('.java')) {
+            candidate = mergeGeneratedJava(
+              existing,
+              content,
+              typeof previous === 'string' ? previous : undefined,
+            );
+          } else if (filePath.endsWith('.md')) {
+            candidate = mergeGeneratedDocument(existing, content);
+          }
+        }
+        generated.set(filePath, candidate);
       } catch (error) {
         if (
           typeof existing === 'string' &&
@@ -738,6 +752,70 @@ export class ProjectService {
 
 function sameGeneratedJava(existing: ProjectFileContent | undefined, generated: string): boolean {
   return typeof existing === 'string' && sameJavaTokens(existing, generated);
+}
+
+interface GeneratedJavaRelocation {
+  readonly classNameChanged: boolean;
+  readonly previousPath: string;
+}
+
+function generatedJavaRelocations(
+  previous: FrcProjectModel,
+  next: FrcProjectModel,
+  previousGenerated: ReadonlyMap<string, ProjectFileContent>,
+  nextGenerated: ReadonlyMap<string, ProjectFileContent>,
+): ReadonlyMap<string, GeneratedJavaRelocation> {
+  const relocations = new Map<string, GeneratedJavaRelocation>();
+  for (const oldSubsystem of previous.subsystems) {
+    const newSubsystem = next.subsystems.find((entry) => entry.id === oldSubsystem.id);
+    if (newSubsystem === undefined) continue;
+    const oldRuntime = subsystemJavaLocation(previous, oldSubsystem).file;
+    const newRuntime = subsystemJavaLocation(next, newSubsystem).file;
+    addRelocation(oldRuntime, newRuntime, oldSubsystem.symbol !== newSubsystem.symbol);
+    addRelocation(
+      oldRuntime.replace(/\.java$/u, 'Config.java'),
+      newRuntime.replace(/\.java$/u, 'Config.java'),
+      oldSubsystem.symbol !== newSubsystem.symbol,
+    );
+  }
+  return relocations;
+
+  function addRelocation(previousPath: string, nextPath: string, classNameChanged: boolean): void {
+    if (
+      previousPath === nextPath ||
+      typeof previousGenerated.get(previousPath) !== 'string' ||
+      typeof nextGenerated.get(nextPath) !== 'string'
+    )
+      return;
+    relocations.set(nextPath, { classNameChanged, previousPath });
+  }
+}
+
+function relocatedJava(
+  existing: ProjectFileContent | undefined,
+  previousGenerated: ProjectFileContent | undefined,
+  generated: string,
+  relocation: GeneratedJavaRelocation,
+): string {
+  if (typeof existing !== 'string' || typeof previousGenerated !== 'string') return generated;
+  if (sameJavaTokens(existing, previousGenerated)) return generated;
+  if (relocation.classNameChanged) {
+    throw new Error(
+      `${relocation.previousPath}: Java symbol changed while team-owned code is present; rename the class in the IDE or restore the generated file before retrying.`,
+    );
+  }
+  const merged = mergeGeneratedJava(existing, generated, previousGenerated);
+  const generatedPackage = /^package\s+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*;/mu.exec(
+    generated,
+  )?.[0];
+  if (generatedPackage === undefined) throw new Error('Generated Java has no package declaration.');
+  if (!/^package\s+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*;/mu.test(merged)) {
+    throw new Error(`${relocation.previousPath}: Java source has no package declaration.`);
+  }
+  return merged.replace(
+    /^package\s+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*;/mu,
+    generatedPackage,
+  );
 }
 
 /**

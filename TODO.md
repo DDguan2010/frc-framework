@@ -755,3 +755,4 @@
 - [x] **CONT-122 P1** 左侧导航/项目树与右侧 Inspector 改为按窗口可用空间动态拉伸，最大宽度扩展到 720/840 px，中等宽度窗口保留拖拽能力，命中区域扩大并在缩放窗口后恢复用户偏好宽度。
 - [x] **CONT-123 P1** 逻辑树为 Robot、Subsystem、Group、Mechanism、各类设备、Goal 与 Command 分配互不重复的 Material 图标，消除 Motor/Command 及不同设备共用图形造成的辨识混淆。
 - [x] **CONT-124 P0** 仓库采用 MIT License，根许可证、发布清单元数据与 README 许可说明保持一致。
+- [x] **CONT-125 P0** Subsystem、Group 与 Mechanism 创建改为名称/父级驱动的自动 Java 位置；Inspector 与拖拽移动同步迁移 runtime、Config、package、import、构造引用、YAML 和 docs，并保留 Managed 区域外队伍代码。

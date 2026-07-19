@@ -434,6 +434,10 @@ test('production shell is secure, accessible, and interactive', async () => {
       page.locator('#subsystem-dialog md-outlined-text-field').nth(0),
       'Intake',
     );
+    await expect(page.locator('#subsystem-dialog .workspace-card .path')).toHaveText(
+      'src/main/java/frc/robot/e2e/subsystems/intake/Intake.java',
+    );
+    await expect(subsystemDialog.getByLabel(i18n.t('structured.javaPackage'))).toHaveCount(0);
     await clickMaterialButton(page, page.locator('#subsystem-dialog md-filled-button'));
     await expect(subsystemDialog).toBeHidden();
     await expect(page.getByText(i18n.t('diff.pending'), { exact: true })).toBeVisible();
@@ -472,6 +476,21 @@ test('production shell is secure, accessible, and interactive', async () => {
     });
     await waitForExternalSync(page);
     await expect(page.getByRole('button', { name: 'Intake direct' })).toBeVisible();
+
+    await page
+      .getByRole('main')
+      .getByRole('button', { name: i18n.t('structured.addSubsystem') })
+      .click();
+    await setMaterialField(
+      page.locator('#subsystem-dialog md-outlined-text-field').first(),
+      'Pivot Helpers',
+    );
+    await setMaterialSelect(page.locator('#subsystem-dialog md-outlined-select').nth(1), 'group');
+    await expect(page.locator('#subsystem-dialog .workspace-card .path')).toHaveText(
+      'src/main/java/frc/robot/e2e/subsystems/intake/pivotHelpers/PivotHelpers.java',
+    );
+    await clickMaterialButton(page, page.locator('#subsystem-dialog md-text-button'));
+    await expect(subsystemDialog).toBeHidden();
 
     await clickMaterialButton(
       page,

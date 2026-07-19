@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { DomainSession } from './history.js';
 import { planSubsystemRemoval, removeSubsystemState } from './deletion.js';
-import { subsystemJavaLocation } from './java-location.js';
+import {
+  automaticSubsystemJavaLocation,
+  subsystemJavaLocation,
+  subsystemUsesAutomaticJavaLocation,
+} from './java-location.js';
 import { createEmptyProject, createEntityId, PRODUCT_NAME, type Subsystem } from './model.js';
 import { validateModel } from './validation.js';
 
@@ -100,6 +104,88 @@ describe('domain model', () => {
     expect(validateModel(cyclic)).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: 'composition-cycle' })]),
     );
+  });
+
+  it('keeps automatic Java locations synchronized across rename, reparent, and undo', () => {
+    const base = fixture();
+    const intakeId = createEntityId();
+    const shooterId = createEntityId();
+    const pivotId = createEntityId();
+    const original = {
+      ...base,
+      subsystems: [
+        {
+          displayName: 'Intake',
+          id: intakeId,
+          javaFile: 'src/main/java/frc/robot/subsystems/intake/Intake.java',
+          javaPackage: 'frc.robot.subsystems.intake',
+          kind: 'subsystem' as const,
+          symbol: 'Intake',
+        },
+        {
+          displayName: 'Pivot',
+          id: pivotId,
+          javaFile: 'src/main/java/frc/robot/subsystems/intake/pivot/Pivot.java',
+          javaPackage: 'frc.robot.subsystems.intake.pivot',
+          kind: 'mechanism' as const,
+          parentId: intakeId,
+          symbol: 'Pivot',
+        },
+        {
+          displayName: 'Shooter',
+          id: shooterId,
+          kind: 'subsystem' as const,
+          symbol: 'Shooter',
+        },
+      ],
+    };
+    expect(subsystemUsesAutomaticJavaLocation(original, intakeId)).toBe(true);
+    expect(automaticSubsystemJavaLocation(original, pivotId).file).toBe(
+      'src/main/java/frc/robot/subsystems/intake/pivot/Pivot.java',
+    );
+
+    const session = new DomainSession(original);
+    const moved = session.execute({
+      changes: { parentId: shooterId },
+      target: { collection: 'subsystems', id: pivotId, scope: 'entity' },
+      type: 'update',
+    });
+    expect(subsystemJavaLocation(moved.model, pivotId).file).toBe(
+      'src/main/java/frc/robot/subsystems/shooter/pivot/Pivot.java',
+    );
+    expect(moved.model.subsystems.find((entry) => entry.id === pivotId)).not.toHaveProperty(
+      'javaFile',
+    );
+
+    const renamed = session.execute({
+      collection: 'subsystems',
+      id: shooterId,
+      symbol: 'Launcher',
+      type: 'rename',
+    });
+    expect(subsystemJavaLocation(renamed.model, pivotId).file).toBe(
+      'src/main/java/frc/robot/subsystems/launcher/pivot/Pivot.java',
+    );
+    expect(renamed.touchedEntityIds).toEqual(expect.arrayContaining([shooterId, pivotId]));
+
+    session.undo();
+    session.undo();
+    expect(session.model.subsystems).toEqual(original.subsystems);
+  });
+
+  it('preserves explicit preset locations that do not match the automatic hierarchy', () => {
+    const base = fixture();
+    const swerve: Subsystem = {
+      displayName: 'Swerve',
+      id: createEntityId(),
+      javaFile: 'src/main/java/frc/robot/subsystems/swerve/SwerveSubsystem.java',
+      javaPackage: 'frc.robot.subsystems.swerve',
+      kind: 'subsystem',
+      symbol: 'SwerveSubsystem',
+    };
+    const model = { ...base, subsystems: [swerve] };
+    expect(subsystemUsesAutomaticJavaLocation(model, swerve)).toBe(false);
+    expect(subsystemJavaLocation(model, swerve).file).toBe(swerve.javaFile);
   });
 
   it('executes typed commands and keeps YAML/code impact metadata', () => {

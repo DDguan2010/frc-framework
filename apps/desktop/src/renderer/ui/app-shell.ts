@@ -5,6 +5,7 @@ import {
   planSubsystemRemoval,
   removeSubsystemState,
   subsystemJavaLocation,
+  subsystemUsesAutomaticJavaLocation,
   validateModel,
   type AppInfo,
   type Device,
@@ -806,11 +807,11 @@ export class AppShell extends LitElement {
   @state() private subsystemName = '';
   @state() private subsystemKind: Subsystem['kind'] = 'subsystem';
   @state() private subsystemBehavior: NonNullable<Subsystem['behaviorMode']> = 'direct';
-  @state() private subsystemPackage = '';
+  @state() private subsystemParentId = '';
   @state() private subsystemReal = true;
   @state() private subsystemSim = true;
   @state() private mechanismName = '';
-  @state() private mechanismSymbol = '';
+  @state() private mechanismParentId = '';
   @state() private mechanismNotes = '';
   @state() private goalName = '';
   @state() private deviceName = '';
@@ -2149,6 +2150,8 @@ export class AppShell extends LitElement {
       selected.symbol === 'SwerveSubsystem'
         ? runtimeFile.replace(/SwerveSubsystem\.java$/u, 'SwerveConfig.java')
         : runtimeFile.replace(/\.java$/u, 'Config.java');
+    const automaticLocation = subsystemUsesAutomaticJavaLocation(model, selected);
+    const parentOptions = this.subsystemParentOptions(selected);
     return html`
       <section class="inspector-section">
         <span class="muted">${selected.kind}</span>
@@ -2170,6 +2173,28 @@ export class AppShell extends LitElement {
           ?disabled=${imported}
           @change=${(event: Event) => this.renameSelected(selected.displayName, inputValue(event))}
         ></md-outlined-text-field>
+        <strong>${t('structured.generatedLocation')}</strong>
+        <span class="path">${runtimeFile}</span>
+        <span class="muted"
+          >${t(automaticLocation ? 'structured.locationAutomatic' : 'structured.locationFixed')}</span
+        >
+        <md-outlined-select
+          label=${t('structured.parent')}
+          .value=${selected.parentId ?? ''}
+          ?disabled=${imported || !automaticLocation}
+          @change=${(event: Event) =>
+            this.moveSubsystemToParent(selected, inputValue(event) || undefined)}
+        >
+          <md-select-option value=""
+            ><div slot="headline">${t('structured.projectRoot')}</div></md-select-option
+          >
+          ${parentOptions.map(
+            (parent) =>
+              html`<md-select-option value=${parent.id}
+                ><div slot="headline">${this.presetParentLabel(parent)}</div></md-select-option
+              >`,
+          )}
+        </md-outlined-select>
       </section>
       <section class="inspector-section">
         <span class="muted">${t('structured.behavior')}</span>
@@ -2268,6 +2293,7 @@ export class AppShell extends LitElement {
     const imported = model !== undefined && this.isEntitySourceReadOnly(model, device);
     const definition =
       device.catalogId === undefined ? undefined : findComponentDefinition(device.catalogId);
+    const owner = model?.subsystems.find((entry) => entry.id === device.parentId);
     const existingKeys = new Set(device.parameters.map((parameter) => parameter.key));
     const optional =
       definition?.parameters.filter((parameter) => !existingKeys.has(parameter.key)) ?? [];
@@ -2285,6 +2311,19 @@ export class AppShell extends LitElement {
         ${definition === undefined ? nothing : html`<span class="path">Real: ${definition.realClass}<br />Sim: ${definition.simClass}</span>`}
         ${definition === undefined ? nothing : html`<md-outlined-button @click=${() => this.openSourceFile(definition.documentationUrl.split('#')[0] ?? definition.documentationUrl)}>${t('inspector.componentDocs')}</md-outlined-button>`}
         <span class="path">CAN ${device.canId ?? '—'} · ${device.canBus ?? 'rio'}</span>
+        <md-outlined-select
+          label=${t('structured.parent')}
+          .value=${owner?.id ?? ''}
+          ?disabled=${imported || model === undefined}
+          @change=${(event: Event) => this.moveDeviceToParent(device, inputValue(event))}
+        >
+          ${(model === undefined ? [] : this.editableSubsystems()).map(
+            (parent) =>
+              html`<md-select-option value=${parent.id}
+                ><div slot="headline">${this.presetParentLabel(parent)}</div></md-select-option
+              >`,
+          )}
+        </md-outlined-select>
       </section>
       <section class="inspector-section">
         <span class="muted">${t('inspector.parameters')}</span>
@@ -2812,6 +2851,12 @@ export class AppShell extends LitElement {
 
   private renderSubsystemDialog(): TemplateResult {
     const t = (key: TranslationKey) => this.#i18n.t(key);
+    const parentOptions = this.editableSubsystems();
+    const location = this.prospectiveSubsystemLocation(
+      this.subsystemName,
+      this.subsystemParentId,
+      this.subsystemKind,
+    );
     return html`<md-dialog id="subsystem-dialog">
       <div slot="headline">${t('structured.addSubsystem')}</div>
       <div slot="content" class="dialog-form">
@@ -2820,6 +2865,21 @@ export class AppShell extends LitElement {
           .value=${this.subsystemName}
           @input=${(event: Event) => (this.subsystemName = inputValue(event))}
         ></md-outlined-text-field>
+        <md-outlined-select
+          label=${t('structured.parent')}
+          .value=${this.subsystemParentId}
+          @change=${(event: Event) => (this.subsystemParentId = inputValue(event))}
+        >
+          <md-select-option value=""
+            ><div slot="headline">${t('structured.projectRoot')}</div></md-select-option
+          >
+          ${parentOptions.map(
+            (subsystem) =>
+              html`<md-select-option value=${subsystem.id}
+                ><div slot="headline">${this.presetParentLabel(subsystem)}</div></md-select-option
+              >`,
+          )}
+        </md-outlined-select>
         <div class="settings-grid">
           <md-outlined-select
             label=${t('structured.kind')}
@@ -2849,11 +2909,11 @@ export class AppShell extends LitElement {
             >
           </md-outlined-select>
         </div>
-        <md-outlined-text-field
-          label=${t('structured.javaPackage')}
-          .value=${this.subsystemPackage}
-          @input=${(event: Event) => (this.subsystemPackage = inputValue(event))}
-        ></md-outlined-text-field>
+        <div class="workspace-card">
+          <strong>${t('structured.generatedLocation')}</strong>
+          <span class="path">${location}</span>
+          <span class="muted">${t('structured.locationAutomatic')}</span>
+        </div>
         <label class="control-row"
           ><md-checkbox
             aria-label=${t('structured.real')}
@@ -2884,6 +2944,12 @@ export class AppShell extends LitElement {
 
   private renderMechanismDialog(): TemplateResult {
     const t = (key: TranslationKey) => this.#i18n.t(key);
+    const parentOptions = this.editableSubsystems();
+    const location = this.prospectiveSubsystemLocation(
+      this.mechanismName,
+      this.mechanismParentId,
+      'mechanism',
+    );
     return html`<md-dialog id="mechanism-dialog">
       <div slot="headline">${t('structured.addMechanism')}</div>
       <div slot="content" class="dialog-form">
@@ -2896,11 +2962,23 @@ export class AppShell extends LitElement {
           .value=${this.mechanismName}
           @input=${(event: Event) => (this.mechanismName = inputValue(event))}
         ></md-outlined-text-field>
-        <md-outlined-text-field
-          label=${t('structured.symbol')}
-          .value=${this.mechanismSymbol}
-          @input=${(event: Event) => (this.mechanismSymbol = inputValue(event))}
-        ></md-outlined-text-field>
+        <md-outlined-select
+          label=${t('structured.parent')}
+          .value=${this.mechanismParentId}
+          @change=${(event: Event) => (this.mechanismParentId = inputValue(event))}
+        >
+          ${parentOptions.map(
+            (subsystem) =>
+              html`<md-select-option value=${subsystem.id}
+                ><div slot="headline">${this.presetParentLabel(subsystem)}</div></md-select-option
+              >`,
+          )}
+        </md-outlined-select>
+        <div class="workspace-card">
+          <strong>${t('structured.generatedLocation')}</strong>
+          <span class="path">${location}</span>
+          <span class="muted">${t('structured.locationAutomatic')}</span>
+        </div>
         <md-outlined-text-field
           label=${t('structured.notes')}
           type="textarea"
@@ -4029,7 +4107,13 @@ export class AppShell extends LitElement {
     this.subsystemName = '';
     this.subsystemKind = 'subsystem';
     this.subsystemBehavior = 'direct';
-    this.subsystemPackage = model === undefined ? '' : `${model.project.javaPackage}.subsystems`;
+    const selected = this.selectedSubsystem();
+    this.subsystemParentId =
+      model !== undefined &&
+      selected !== undefined &&
+      !this.isSubsystemSourceReadOnly(model, selected)
+        ? selected.id
+        : '';
     this.dialog('subsystem-dialog')?.show();
   };
 
@@ -4039,7 +4123,7 @@ export class AppShell extends LitElement {
       return;
     }
     this.mechanismName = '';
-    this.mechanismSymbol = '';
+    this.mechanismParentId = this.selectedSubsystem()?.id ?? '';
     this.mechanismNotes = '';
     this.dialog('mechanism-dialog')?.show();
   };
@@ -4147,6 +4231,58 @@ export class AppShell extends LitElement {
       parentId = parent.parentId;
     }
     return names.join(' / ');
+  }
+
+  private editableSubsystems(): readonly Subsystem[] {
+    const model = this.model();
+    if (model === undefined) return [];
+    return model.subsystems.filter(
+      (subsystem) => !this.isSubsystemSourceReadOnly(model, subsystem),
+    );
+  }
+
+  private prospectiveSubsystemLocation(
+    name: string,
+    parentId: string,
+    kind: Subsystem['kind'],
+  ): string {
+    const model = this.model();
+    if (model === undefined) return '';
+    const symbol = javaSymbol(name.trim(), kind === 'mechanism' ? 'Mechanism' : 'Subsystem');
+    const preview: Subsystem = {
+      displayName: name.trim() || symbol,
+      id: '__location_preview__',
+      kind,
+      ...(parentId.length === 0 ? {} : { parentId }),
+      symbol,
+    };
+    try {
+      return subsystemJavaLocation(
+        { ...model, subsystems: [...model.subsystems, preview] },
+        preview,
+      ).file;
+    } catch {
+      return '';
+    }
+  }
+
+  private subsystemParentOptions(subsystem: Subsystem): readonly Subsystem[] {
+    const model = this.model();
+    if (model === undefined) return [];
+    return this.editableSubsystems().filter((candidate) => {
+      if (candidate.id === subsystem.id) return false;
+      let cursor: Subsystem | undefined = candidate;
+      const visited = new Set<string>();
+      while (cursor !== undefined && !visited.has(cursor.id)) {
+        if (cursor.id === subsystem.id) return false;
+        visited.add(cursor.id);
+        cursor =
+          cursor.parentId === undefined
+            ? undefined
+            : model.subsystems.find((entry) => entry.id === cursor?.parentId);
+      }
+      return true;
+    });
   }
 
   private readonly createPreset = async (): Promise<void> => {
@@ -4681,17 +4817,22 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
     const name = this.subsystemName.trim();
     if (model === undefined || name.length === 0) return;
     const symbol = javaSymbol(name);
-    const javaPackage =
-      this.subsystemPackage.trim() ||
-      `${model.project.javaPackage}.subsystems.${symbol.slice(0, 1).toLowerCase()}${symbol.slice(1)}`;
+    const parent =
+      this.subsystemParentId.length === 0
+        ? undefined
+        : model.subsystems.find((entry) => entry.id === this.subsystemParentId);
+    if (
+      this.subsystemParentId.length > 0 &&
+      (parent === undefined || this.isSubsystemSourceReadOnly(model, parent))
+    )
+      return;
     const id = createEntityId();
     const entity: Subsystem = {
       behaviorMode: this.subsystemBehavior,
       displayName: name,
       id,
-      javaFile: `src/main/java/${javaPackage.replace(/\./gu, '/')}/${symbol}.java`,
-      javaPackage,
       kind: this.subsystemKind,
+      ...(parent === undefined ? {} : { parentId: parent.id }),
       realImplementation: this.subsystemReal,
       simulationImplementation: this.subsystemSim,
       ...(this.subsystemBehavior === 'goal-driven'
@@ -4715,12 +4856,12 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       symbol,
     };
     this.dialog('subsystem-dialog')?.close();
-    this.selectedEntityId = id;
+    this.revealEntityInTree({ ...model, subsystems: [...model.subsystems, entity] }, id);
     await this.previewCommand({ collection: 'subsystems', entity, type: 'add' });
   };
 
   private readonly addMechanism = async (): Promise<void> => {
-    const parent = this.selectedSubsystem();
+    const parent = this.model()?.subsystems.find((entry) => entry.id === this.mechanismParentId);
     const name = this.mechanismName.trim();
     const model = this.model();
     if (
@@ -4743,7 +4884,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
             id,
             kind: 'mechanism',
             parentId: parent.id,
-            symbol: this.mechanismSymbol.trim() || javaSymbol(name),
+            symbol: javaSymbol(name),
           },
         ],
       },
@@ -4758,7 +4899,7 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
         kind: 'mechanism',
         ...(this.mechanismNotes.trim().length === 0 ? {} : { notes: this.mechanismNotes.trim() }),
         parentId: parent.id,
-        symbol: this.mechanismSymbol.trim() || javaSymbol(name),
+        symbol: javaSymbol(name),
       },
       type: 'add',
     });
@@ -4950,6 +5091,42 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       id: selected.id,
       symbol,
       type: 'rename',
+    });
+  }
+
+  private async moveSubsystemToParent(
+    subsystem: Subsystem,
+    parentId: string | undefined,
+  ): Promise<void> {
+    const model = this.model();
+    if (
+      model === undefined ||
+      subsystem.parentId === parentId ||
+      !subsystemUsesAutomaticJavaLocation(model, subsystem) ||
+      this.isSubsystemSourceReadOnly(model, subsystem) ||
+      (parentId !== undefined && !this.canReparent(subsystem.id, parentId))
+    )
+      return;
+    await this.previewCommand({
+      changes: { parentId },
+      target: { collection: 'subsystems', id: subsystem.id, scope: 'entity' },
+      type: 'update',
+    });
+  }
+
+  private async moveDeviceToParent(device: Device, parentId: string): Promise<void> {
+    const model = this.model();
+    if (
+      model === undefined ||
+      parentId.length === 0 ||
+      device.parentId === parentId ||
+      !this.canReparent(device.id, parentId)
+    )
+      return;
+    await this.previewCommand({
+      changes: { parentId },
+      target: { collection: 'devices', id: device.id, scope: 'entity' },
+      type: 'update',
     });
   }
 
@@ -5674,7 +5851,11 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
       const draggedDevice = model.devices.find((entry) => entry.id === draggedId);
       return draggedDevice !== undefined && !this.isEntitySourceReadOnly(model, draggedDevice);
     }
-    if (this.isSubsystemSourceReadOnly(model, draggedSubsystem)) return false;
+    if (
+      this.isSubsystemSourceReadOnly(model, draggedSubsystem) ||
+      !subsystemUsesAutomaticJavaLocation(model, draggedSubsystem)
+    )
+      return false;
     let cursor: Subsystem | undefined = target;
     while (cursor !== undefined) {
       if (cursor.id === draggedSubsystem.id) return false;
