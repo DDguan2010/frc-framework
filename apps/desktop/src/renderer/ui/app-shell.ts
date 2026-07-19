@@ -42,7 +42,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { keyed } from 'lit/directives/keyed.js';
 
 import frameworkLogo from '../assets/frameworklogo.svg?url';
-import { autoCodeFile, commandCodeFile } from './code-location.js';
+import { autoCodeLocation, commandCodeLocation } from './code-location.js';
 import { projectTreeIcon } from './project-tree-icons.js';
 
 import type {
@@ -1086,9 +1086,7 @@ export class AppShell extends LitElement {
         }
         for (const command of commands) {
           if (query.length === 0 || command.displayName.toLowerCase().includes(query)) {
-            rows.push(
-              this.treeLeaf(command.displayName, 'command', depth + 1, projectTreeIcon('command')),
-            );
+            rows.push(this.treeCommandLeaf(model, command, depth + 1));
           }
         }
       }
@@ -1096,7 +1094,7 @@ export class AppShell extends LitElement {
     visit(undefined, 1);
     for (const command of model.commands.filter((entry) => entry.requirementIds.length === 0)) {
       if (query.length === 0 || command.displayName.toLowerCase().includes(query)) {
-        rows.push(this.treeLeaf(command.displayName, 'command', 1, projectTreeIcon('command')));
+        rows.push(this.treeCommandLeaf(model, command, 1));
       }
     }
     return rows;
@@ -1180,6 +1178,36 @@ export class AppShell extends LitElement {
       <span class="tree-node-label">${label}</span>
       <span class="tree-badge">${kind}</span>
     </button>`;
+  }
+
+  private treeCommandLeaf(
+    model: FrcProjectModel,
+    command: CommandDefinition,
+    depth: number,
+  ): TemplateResult {
+    const target = commandCodeLocation(model, command, this.project?.sourceFiles ?? []);
+    return html`<div
+      class="tree-node-wrap"
+      style=${`padding-left:${String(7 + depth * 14)}px`}
+      data-entity-id=${command.id}
+    >
+      <button
+        class="tree-node"
+        role="treeitem"
+        data-entity-id=${command.id}
+        @dblclick=${() => this.openSourceFile(target.file, target.line, target.column)}
+      >
+        <md-icon></md-icon>
+        <md-icon>${projectTreeIcon('command')}</md-icon>
+        <span class="tree-node-label">${command.displayName}</span>
+        <span class="tree-badge">command</span>
+      </button>
+      <md-icon-button
+        aria-label=${this.#i18n.t('inspector.openCode')}
+        @click=${() => this.openSourceFile(target.file, target.line, target.column)}
+        ><md-icon>code</md-icon></md-icon-button
+      >
+    </div>`;
   }
 
   private sourceTreeRows(query: string): readonly TemplateResult[] {
@@ -1900,7 +1928,7 @@ export class AppShell extends LitElement {
             : model.autos.map((auto) => {
                 const command = model.commands.find((entry) => entry.id === auto.commandId);
                 const imported = this.isUnmanagedPath(model, command?.javaFile);
-                const codeFile = autoCodeFile(model, auto);
+                const codeTarget = autoCodeLocation(model, auto, this.project?.sourceFiles ?? []);
                 return html`<div class="hierarchy-row">
                   <span
                     ><strong>${auto.displayName}</strong><br /><span class="muted"
@@ -1912,7 +1940,8 @@ export class AppShell extends LitElement {
                     ${auto.pathFiles[0] === undefined ? nothing : html`<md-icon-button aria-label=${t('auto.openPath')} @click=${() => this.openSourceFile(`src/main/deploy/${auto.pathFiles[0] ?? ''}`)}><md-icon>open_in_new</md-icon></md-icon-button>`}
                     <md-icon-button
                       aria-label=${t('inspector.openCode')}
-                      @click=${() => this.openSourceFile(codeFile)}
+                      @click=${() =>
+                        this.openSourceFile(codeTarget.file, codeTarget.line, codeTarget.column)}
                       ><md-icon>code</md-icon></md-icon-button
                     >
                     ${
@@ -2017,6 +2046,7 @@ export class AppShell extends LitElement {
       <div class="hierarchy-list">
         ${model.commands.map((command) => {
           const imported = this.isUnmanagedPath(model, command.javaFile);
+          const codeTarget = commandCodeLocation(model, command, this.project?.sourceFiles ?? []);
           const requirements = command.requirementIds
             .map((id) => model.subsystems.find((entry) => entry.id === id)?.displayName ?? '?')
             .join(', ');
@@ -2032,14 +2062,15 @@ export class AppShell extends LitElement {
                 >${command.kind} ·
                 ${command.factory === false ? t('commands.instance') : t('commands.factory')}${command.pathplannerName === undefined ? '' : ` · PathPlanner: ${command.pathplannerName}`}</span
               >
+              <md-icon-button
+                aria-label=${t('inspector.openCode')}
+                @click=${() =>
+                  this.openSourceFile(codeTarget.file, codeTarget.line, codeTarget.column)}
+                ><md-icon>code</md-icon></md-icon-button
+              >
               ${
                 imported
-                  ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>
-                      <md-icon-button
-                        aria-label=${t('inspector.openCode')}
-                        @click=${() => this.openSourceFile(command.javaFile ?? '')}
-                        ><md-icon>code</md-icon></md-icon-button
-                      >`
+                  ? html`<span class="ownership">${t('structured.importedReadOnly')}</span>`
                   : html`<md-icon-button
                       aria-label=${t('tree.delete')}
                       @click=${() => this.removeCommand(command.id)}
@@ -4698,9 +4729,11 @@ export class AppShell extends LitElement {
     )
       return `src/main/java/${packagePath}/controls/OperatorInterface.java`;
     const command = model.commands.find((entry) => entry.id === entityId);
-    if (command !== undefined) return commandCodeFile(model, command);
+    if (command !== undefined)
+      return commandCodeLocation(model, command, this.project?.sourceFiles ?? []).file;
     const auto = model.autos.find((entry) => entry.id === entityId);
-    if (auto !== undefined) return autoCodeFile(model, auto);
+    if (auto !== undefined)
+      return autoCodeLocation(model, auto, this.project?.sourceFiles ?? []).file;
     return undefined;
   }
 

@@ -338,13 +338,17 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect(generatedAutoRow).toBeVisible();
     await page.locator('frc-framework-app').evaluate((element) => {
       const shell = element as HTMLElement & {
-        e2eOpenedSource?: string;
-        e2eOriginalOpenSourceFile?: (path: string) => Promise<void>;
-        openSourceFile: (path: string) => Promise<void>;
+        e2eOpenedSource?: { column?: number; file: string; line: number };
+        e2eOriginalOpenSourceFile?: (path: string, line?: number, column?: number) => Promise<void>;
+        openSourceFile: (path: string, line?: number, column?: number) => Promise<void>;
       };
       shell.e2eOriginalOpenSourceFile = shell.openSourceFile;
-      shell.openSourceFile = async (file) => {
-        shell.e2eOpenedSource = file;
+      shell.openSourceFile = async (file, line = 1, column) => {
+        shell.e2eOpenedSource = {
+          ...(column === undefined ? {} : { column }),
+          file,
+          line,
+        };
       };
     });
     await clickMaterialButton(
@@ -354,10 +358,25 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect
       .poll(() =>
         page.locator('frc-framework-app').evaluate((element) => {
-          return (element as HTMLElement & { e2eOpenedSource?: string }).e2eOpenedSource;
+          return (
+            element as HTMLElement & {
+              e2eOpenedSource?: { column?: number; file: string; line: number };
+            }
+          ).e2eOpenedSource;
         }),
       )
-      .toBe('src/main/java/frc/robot/e2e/commands/RobotCommands.java');
+      .toMatchObject({
+        file: 'src/main/java/frc/robot/e2e/commands/RobotCommands.java',
+      });
+    expect(
+      await page.locator('frc-framework-app').evaluate((element) => {
+        return (
+          element as HTMLElement & {
+            e2eOpenedSource?: { line: number };
+          }
+        ).e2eOpenedSource?.line;
+      }),
+    ).toBeGreaterThan(1);
     await clickMaterialButton(
       page,
       generatedAutoRow.getByRole('button', { name: i18n.t('auto.openPath') }),
@@ -365,14 +384,76 @@ test('production shell is secure, accessible, and interactive', async () => {
     await expect
       .poll(() =>
         page.locator('frc-framework-app').evaluate((element) => {
-          return (element as HTMLElement & { e2eOpenedSource?: string }).e2eOpenedSource;
+          return (
+            element as HTMLElement & {
+              e2eOpenedSource?: { column?: number; file: string; line: number };
+            }
+          ).e2eOpenedSource;
         }),
       )
-      .toBe('src/main/deploy/pathplanner/paths/Center.path');
+      .toEqual({ file: 'src/main/deploy/pathplanner/paths/Center.path', line: 1 });
+    await clickMaterialButton(
+      page,
+      page
+        .getByRole('navigation', { name: i18n.t('nav.workspace') })
+        .locator('md-list-item')
+        .filter({ hasText: i18n.t('nav.commands') }),
+    );
+    const generatedCommandRow = page
+      .getByRole('main')
+      .locator('.hierarchy-row')
+      .filter({ hasText: 'Generated Auto Command' });
+    await expect(generatedCommandRow).toBeVisible();
+    await clickMaterialButton(
+      page,
+      generatedCommandRow.getByRole('button', { name: i18n.t('inspector.openCode') }),
+    );
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          return (
+            element as HTMLElement & {
+              e2eOpenedSource?: { column?: number; file: string; line: number };
+            }
+          ).e2eOpenedSource;
+        }),
+      )
+      .toMatchObject({
+        file: 'src/main/java/frc/robot/e2e/commands/RobotCommands.java',
+      });
+    expect(
+      await page.locator('frc-framework-app').evaluate((element) => {
+        return (element as HTMLElement & { e2eOpenedSource?: { line: number } }).e2eOpenedSource
+          ?.line;
+      }),
+    ).toBeGreaterThan(1);
+    const generatedCommandTreeItem = page.getByRole('treeitem', {
+      name: 'Generated Auto Command command',
+    });
+    await expect(generatedCommandTreeItem).toBeVisible();
+    await clickMaterialButton(
+      page,
+      generatedCommandTreeItem
+        .locator('..')
+        .getByRole('button', { name: i18n.t('inspector.openCode') }),
+    );
+    await expect
+      .poll(() =>
+        page.locator('frc-framework-app').evaluate((element) => {
+          return (
+            element as HTMLElement & {
+              e2eOpenedSource?: { column?: number; file: string; line: number };
+            }
+          ).e2eOpenedSource;
+        }),
+      )
+      .toMatchObject({
+        file: 'src/main/java/frc/robot/e2e/commands/RobotCommands.java',
+      });
     await page.locator('frc-framework-app').evaluate((element) => {
       const shell = element as HTMLElement & {
-        e2eOriginalOpenSourceFile?: (path: string) => Promise<void>;
-        openSourceFile: (path: string) => Promise<void>;
+        e2eOriginalOpenSourceFile?: (path: string, line?: number, column?: number) => Promise<void>;
+        openSourceFile: (path: string, line?: number, column?: number) => Promise<void>;
       };
       if (shell.e2eOriginalOpenSourceFile !== undefined) {
         shell.openSourceFile = shell.e2eOriginalOpenSourceFile;
