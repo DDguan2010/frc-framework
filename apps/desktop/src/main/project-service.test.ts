@@ -6,7 +6,11 @@ import path from 'node:path';
 import { generateStructuredFiles } from '@frc-framework/code-generator';
 import { createEmptyProject, createEntityId } from '@frc-framework/domain';
 import { instantiateCatalogDevice } from '@frc-framework/frc-catalog';
-import { instantiateCommonPreset, instantiateSwervePreset } from '@frc-framework/presets';
+import {
+  instantiateCommonPreset,
+  instantiateLimelightPreset,
+  instantiateSwervePreset,
+} from '@frc-framework/presets';
 import { parseProjectYaml, stringifyProjectYaml } from '@frc-framework/project-io';
 import { describe, expect, it } from 'vitest';
 
@@ -127,6 +131,91 @@ public final class IntakeSubsystem extends SubsystemBase {}
       expect(reopened.model?.subsystems.map((entry) => entry.symbol)).toContain('IntakeSubsystem');
       expect(reopened.model?.subsystems.some((entry) => entry.symbol.endsWith('Config'))).toBe(
         false,
+      );
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('keeps every fully generated preset structurally editable after reopen', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'frc-framework-editable-presets-'));
+    const stateRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'frc-framework-editable-presets-state-'),
+    );
+    const base = createEmptyProject({
+      javaPackage: 'frc.robot',
+      name: 'Editable Preset Robot',
+      teamNumber: 10541,
+      wpilibYear: 2026,
+    });
+    let model = instantiateSwervePreset(base, {
+      canBus: 'rio',
+      driveIds: [1, 4, 7, 10],
+      driveRatio: 6.75,
+      encoderIds: [3, 6, 9, 12],
+      encoderOffsets: [0, 0, 0, 0],
+      gyroId: 13,
+      maxSpeed: 4.5,
+      steerIds: [2, 5, 8, 11],
+      steerRatio: 12.8,
+      trackwidth: 0.55,
+      wheelRadius: 0.05,
+      wheelbase: 0.55,
+    });
+    model = instantiateLimelightPreset(model, {
+      deviceName: 'Front Limelight',
+      pipeline: 0,
+      table: 'limelight-front',
+      transform: [0.25, 0, 0.55, 0, -18, 0],
+    });
+    model = instantiateCommonPreset(model, 'frc.velocity-flywheel', {
+      canBus: 'rio',
+      canId: 20,
+      name: 'ShooterFlywheel',
+      setpoints: ['IDLE=0', 'SHOOTING=80'],
+      setpointUnit: 'rps',
+    });
+    model = instantiateCommonPreset(model, 'frc.position-mechanism', {
+      canBus: 'rio',
+      canId: 21,
+      name: 'ShooterHood',
+      setpoints: ['STOWED=0', 'SHOOTING=35'],
+      setpointUnit: 'deg',
+    });
+    model = instantiateCommonPreset(model, 'frc.beambreak-indexer', {
+      canBus: 'rio',
+      canId: 22,
+      channel: 0,
+      name: 'Feeder',
+    });
+    model = instantiateCommonPreset(model, 'frc.led-indicator', {
+      channel: 1,
+      name: 'StatusLights',
+    });
+    await writeStructuredFixture(root, model);
+
+    const store = new SettingsStore(path.join(stateRoot, 'state.json'));
+    await store.load();
+    const service = new ProjectService(store, path.resolve('resources/base-template'));
+    try {
+      const opened = await service.open(root);
+      const generatedJava = [...generateStructuredFiles(model).keys()].filter((file) =>
+        file.endsWith('.java'),
+      );
+      expect(generatedJava.length).toBeGreaterThan(0);
+      for (const generatedPath of generatedJava) {
+        expect(opened.model?.unmanagedFiles).not.toContain(generatedPath);
+      }
+      expect(opened.model?.unmanagedFiles).toEqual(model.unmanagedFiles);
+      expect(opened.model?.subsystems.map((entry) => entry.symbol)).toEqual(
+        expect.arrayContaining([
+          'SwerveSubsystem',
+          'LimelightSubsystem',
+          'ShooterFlywheel',
+          'ShooterHood',
+          'Feeder',
+          'StatusLights',
+        ]),
       );
     } finally {
       await service.close();

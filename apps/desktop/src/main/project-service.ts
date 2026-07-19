@@ -1337,7 +1337,12 @@ function mergeSourceOverlay(
     controllers,
     devices,
     subsystems,
-    unmanagedFiles: [...new Set([...structured.unmanagedFiles, ...inferred.unmanagedFiles])].sort(),
+    unmanagedFiles: [
+      ...new Set([
+        ...structured.unmanagedFiles,
+        ...inferred.unmanagedFiles.filter((file) => isSourceOwned(file)),
+      ]),
+    ].sort(),
   };
 }
 

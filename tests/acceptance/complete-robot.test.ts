@@ -11,7 +11,7 @@ import {
   type StateMachine,
   type Subsystem,
 } from '../../packages/domain/src/index.ts';
-import { createProject } from '../../packages/code-generator/src/index.ts';
+import { createProject, generateStructuredFiles } from '../../packages/code-generator/src/index.ts';
 import { JavaProjectIndexer } from '../../packages/java-parser/src/index.ts';
 import {
   instantiateCommonPreset,
@@ -427,6 +427,9 @@ describe.runIf(process.env.FRC_FRAMEWORK_RUN_ACCEPTANCE_ROBOT === '1')(
         );
         expect(opened.model?.bindings).toHaveLength(model.bindings.length);
         expect(opened.model?.autos).toHaveLength(model.autos.length);
+        for (const generatedPath of generateStructuredFiles(model).keys()) {
+          expect(opened.model?.unmanagedFiles).not.toContain(generatedPath);
+        }
         const intake = requiredSubsystem(model, 'Intake');
         const shooter = requiredSubsystem(model, 'Shooter');
         const pivot = requiredSubsystem(model, 'IntakePivot');
