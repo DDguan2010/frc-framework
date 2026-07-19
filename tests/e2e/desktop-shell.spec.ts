@@ -41,6 +41,57 @@ test('production shell is secure, accessible, and interactive', async () => {
       const bounds = window.getBounds();
       window.setSize(Math.min(bounds.width, 1040), Math.min(bounds.height, 720));
     });
+    const windowControls = page.getByRole('group', { name: i18n.t('window.controls') });
+    const minimizeWindow = windowControls.getByRole('button', {
+      name: i18n.t('window.minimize'),
+    });
+    const maximizeWindow = windowControls.getByRole('button', {
+      name: i18n.t('window.maximize'),
+    });
+    await expect(windowControls).toBeVisible();
+    await expect(minimizeWindow).toBeVisible();
+    await expect(maximizeWindow).toBeVisible();
+    await expect(
+      windowControls.getByRole('button', { name: i18n.t('window.close') }),
+    ).toBeVisible();
+    const titleBarRegions = await page.locator('frc-framework-app').evaluate((element) => {
+      const root = element.shadowRoot;
+      const titleBar = root?.querySelector('.top-bar');
+      const control = root?.querySelector('.window-control');
+      return {
+        control:
+          control === null || control === undefined
+            ? ''
+            : getComputedStyle(control).getPropertyValue('-webkit-app-region'),
+        titleBar:
+          titleBar === null || titleBar === undefined
+            ? ''
+            : getComputedStyle(titleBar).getPropertyValue('-webkit-app-region'),
+      };
+    });
+    expect(titleBarRegions).toEqual({ control: 'no-drag', titleBar: 'drag' });
+    if (process.platform !== 'darwin') {
+      await expect
+        .poll(() =>
+          application.evaluate(
+            ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMenuBarVisible() ?? true,
+          ),
+        )
+        .toBe(false);
+    }
+    await maximizeWindow.click();
+    await expect(
+      windowControls.getByRole('button', { name: i18n.t('window.restore') }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        application.evaluate(
+          ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false,
+        ),
+      )
+      .toBe(true);
+    await windowControls.getByRole('button', { name: i18n.t('window.restore') }).click();
+    await expect(maximizeWindow).toBeVisible();
     await expect(page.getByRole('navigation', { name: i18n.t('nav.workspace') })).toBeVisible();
     await expect(page.getByRole('button', { name: i18n.t('home.choose') })).toBeVisible();
     await expect(page.getByRole('complementary', { name: i18n.t('inspector.title') })).toBeVisible({

@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 
-import { app, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 
 import {
   SCHEMA_VERSION,
@@ -119,6 +119,22 @@ export function registerIpcHandlers(
     },
   );
   ipcMain.handle(IPC_CHANNELS.windowGetState, (): WindowState => settings.state.window);
+  ipcMain.handle(IPC_CHANNELS.windowIsMaximized, (event): boolean => {
+    return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
+  });
+  ipcMain.handle(IPC_CHANNELS.windowMinimize, (event): void => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+  ipcMain.handle(IPC_CHANNELS.windowToggleMaximize, (event): boolean => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window === null) return false;
+    if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+    return window.isMaximized();
+  });
+  ipcMain.handle(IPC_CHANNELS.windowClose, (event): void => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+  });
   ipcMain.handle(
     IPC_CHANNELS.windowUpdateState,
     (_event, changes: Partial<WindowState>): Promise<WindowState> => settings.patchWindow(changes),

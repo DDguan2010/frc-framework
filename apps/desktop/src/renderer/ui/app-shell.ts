@@ -141,6 +141,7 @@ export class AppShell extends LitElement {
     }
 
     .top-bar {
+      -webkit-app-region: drag;
       align-items: center;
       background: var(--md-sys-color-surface-container-low);
       border-bottom: 1px solid var(--md-sys-color-outline-variant);
@@ -148,6 +149,44 @@ export class AppShell extends LitElement {
       gap: 10px;
       grid-area: top;
       padding: 0 18px;
+      user-select: none;
+    }
+
+    .top-bar md-filled-button,
+    .top-bar md-icon-button,
+    .top-bar md-outlined-button {
+      -webkit-app-region: no-drag;
+    }
+
+    .window-controls {
+      -webkit-app-region: no-drag;
+      align-items: stretch;
+      align-self: stretch;
+      display: flex;
+      margin-left: 2px;
+      margin-right: -18px;
+    }
+
+    .window-control {
+      border-radius: 0;
+      height: 63px;
+      width: 46px;
+      --md-icon-button-icon-color: var(--md-sys-color-on-surface-variant);
+      --md-icon-button-hover-icon-color: var(--md-sys-color-on-surface);
+      --md-icon-button-hover-state-layer-color: var(--md-sys-color-on-surface);
+      --md-icon-button-state-layer-shape: 0;
+    }
+
+    .window-control md-icon {
+      font-size: 18px;
+    }
+
+    .window-close {
+      --md-icon-button-hover-icon-color: var(--md-sys-color-on-error);
+      --md-icon-button-hover-state-layer-color: var(--md-sys-color-error);
+      --md-icon-button-hover-state-layer-opacity: 1;
+      --md-icon-button-pressed-icon-color: var(--md-sys-color-on-error);
+      --md-icon-button-pressed-state-layer-color: var(--md-sys-color-error);
     }
 
     .brand {
@@ -775,6 +814,7 @@ export class AppShell extends LitElement {
   };
   #removeProjectListener: (() => void) | undefined;
   #removeFilesChangedListener: (() => void) | undefined;
+  #removeMaximizedListener: (() => void) | undefined;
   #ntTimer: ReturnType<typeof setInterval> | undefined;
   #toolchainTimer: ReturnType<typeof setInterval> | undefined;
   #sourceSyncTimer: ReturnType<typeof setTimeout> | undefined;
@@ -786,6 +826,7 @@ export class AppShell extends LitElement {
   @state() private editors: readonly EditorCandidate[] = [];
   @state() private settings: AppSettings = fallbackSettings;
   @state() private layout: WindowState = fallbackWindow;
+  @state() private windowMaximized = false;
   @state() private working = false;
   @state() private notice = '';
   @state() private noticeError = false;
@@ -939,6 +980,9 @@ export class AppShell extends LitElement {
         return;
       }
       this.#sourceSyncTimer = setTimeout(() => void this.synchronizeExternalSource(), 120);
+    });
+    this.#removeMaximizedListener = window.framework.window.onMaximizedChanged((maximized) => {
+      this.windowMaximized = maximized;
     });
     void this.initialize();
   }
@@ -2505,6 +2549,7 @@ export class AppShell extends LitElement {
     window.removeEventListener('resize', this.#windowResizeHandler);
     this.#removeProjectListener?.();
     this.#removeFilesChangedListener?.();
+    this.#removeMaximizedListener?.();
     if (this.#ntTimer !== undefined) clearInterval(this.#ntTimer);
     if (this.#toolchainTimer !== undefined) clearInterval(this.#toolchainTimer);
     if (this.#sourceSyncTimer !== undefined) clearTimeout(this.#sourceSyncTimer);
@@ -2537,6 +2582,32 @@ export class AppShell extends LitElement {
           <md-filled-button @click=${this.chooseDirectory} ?disabled=${this.working}>
             ${this.working ? t('app.opening') : t('app.openFolder')}
           </md-filled-button>
+          <div class="window-controls" role="group" aria-label=${t('window.controls')}>
+            <md-icon-button
+              class="window-control"
+              aria-label=${t('window.minimize')}
+              title=${t('window.minimize')}
+              @click=${this.minimizeWindow}
+            >
+              <md-icon>remove</md-icon>
+            </md-icon-button>
+            <md-icon-button
+              class="window-control"
+              aria-label=${this.windowMaximized ? t('window.restore') : t('window.maximize')}
+              title=${this.windowMaximized ? t('window.restore') : t('window.maximize')}
+              @click=${this.toggleMaximizeWindow}
+            >
+              <md-icon>${this.windowMaximized ? 'filter_none' : 'crop_square'}</md-icon>
+            </md-icon-button>
+            <md-icon-button
+              class="window-control window-close"
+              aria-label=${t('window.close')}
+              title=${t('window.close')}
+              @click=${this.closeWindow}
+            >
+              <md-icon>close</md-icon>
+            </md-icon-button>
+          </div>
         </header>
 
         <nav aria-label=${t('nav.workspace')}>
@@ -3951,13 +4022,15 @@ export class AppShell extends LitElement {
 
   private async initialize(): Promise<void> {
     try {
-      const [settings, layout, recentProjects, editors, appInfo] = await Promise.all([
-        window.framework.settings.get(),
-        window.framework.window.getState(),
-        window.framework.recent.list(),
-        window.framework.editor.detect(),
-        window.framework.app.getInfo(),
-      ]);
+      const [settings, layout, recentProjects, editors, appInfo, windowMaximized] =
+        await Promise.all([
+          window.framework.settings.get(),
+          window.framework.window.getState(),
+          window.framework.recent.list(),
+          window.framework.editor.detect(),
+          window.framework.app.getInfo(),
+          window.framework.window.isMaximized(),
+        ]);
       this.settings = settings;
       this.#preferredPanelWidths = {
         inspectorWidth: layout.inspectorWidth,
@@ -3967,6 +4040,7 @@ export class AppShell extends LitElement {
       this.recentProjects = recentProjects;
       this.editors = editors;
       this.appInfo = appInfo;
+      this.windowMaximized = windowMaximized;
       this.createTeam = String(settings.defaultProject.teamNumber);
       this.createPackage = settings.defaultProject.javaPackage;
       this.createYear = String(settings.defaultProject.wpilibYear);
@@ -6299,6 +6373,21 @@ ${problems.length === 0 ? 'No problems detected.' : problems.map((problem) => `-
   private openAbout(): void {
     this.dialog('about-dialog')?.show();
   }
+
+  private readonly minimizeWindow = (): void => {
+    void window.framework.window.minimize();
+  };
+
+  private readonly toggleMaximizeWindow = (): void => {
+    void window.framework.window
+      .toggleMaximize()
+      .then((maximized) => (this.windowMaximized = maximized))
+      .catch((error: unknown) => this.showError(error));
+  };
+
+  private readonly closeWindow = (): void => {
+    void window.framework.window.close();
+  };
 
   private readonly checkForUpdates = async (): Promise<void> => {
     await this.run(async () => {

@@ -765,3 +765,4 @@
 - [x] **CONT-132 P1** 左侧逻辑树与 Command 工作区为全部手写/生成 Command 提供统一代码入口，并利用实时 Java 符号索引将编辑器直接定位到对应方法的行列；Auto 关联 Command 复用同一定位结果。
 - [x] **CONT-133 P0** Java 回读将 Subsystem 类内的 Command 工厂及其子目录独立 Command 类自动关联到所属 Subsystem；真实跨系统/项目级 Command 保留在 Robot 根部，10541 与合成手写项目均有归属回归测试。
 - [x] **CONT-134 P0** 混合手写/生成项目中的预制添加、Controller 删除和 Command 级联删除改用增量 Domain 事务，不再把只读源码覆盖层整批回写为受管结构；Electron E2E 覆盖手写 Subsystem 与新增预制并存。
+- [x] **CONT-135 P1** Electron 使用可缩放的无边框窗口，将拖拽区域与最小化、最大化/还原、关闭操作合并进 Material 3 应用顶栏；窗口状态通过受限 IPC 实时同步并纳入跨平台 E2E 回归。

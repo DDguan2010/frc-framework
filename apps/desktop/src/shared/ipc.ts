@@ -40,7 +40,12 @@ export const IPC_CHANNELS = {
   recentRemove: 'recent:remove',
   settingsGet: 'settings:get',
   settingsUpdate: 'settings:update',
+  windowClose: 'window:close',
   windowGetState: 'window:get-state',
+  windowIsMaximized: 'window:is-maximized',
+  windowMaximizedChanged: 'window:maximized-changed',
+  windowMinimize: 'window:minimize',
+  windowToggleMaximize: 'window:toggle-maximize',
   windowUpdateState: 'window:update-state',
 } as const;
 
@@ -346,7 +351,12 @@ export interface FrameworkApi {
     update(changes: Partial<AppSettings>): Promise<AppSettings>;
   };
   readonly window: {
+    close(): Promise<void>;
     getState(): Promise<WindowState>;
+    isMaximized(): Promise<boolean>;
+    minimize(): Promise<void>;
+    onMaximizedChanged(listener: (maximized: boolean) => void): () => void;
+    toggleMaximize(): Promise<boolean>;
     updateState(changes: Partial<WindowState>): Promise<WindowState>;
   };
 }

@@ -123,7 +123,17 @@ const frameworkApi: FrameworkApi = Object.freeze({
       ipcRenderer.invoke(IPC_CHANNELS.settingsUpdate, changes),
   }),
   window: Object.freeze({
+    close: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.windowClose),
     getState: (): Promise<WindowState> => ipcRenderer.invoke(IPC_CHANNELS.windowGetState),
+    isMaximized: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.windowIsMaximized),
+    minimize: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize),
+    onMaximizedChanged: (listener: (maximized: boolean) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, maximized: boolean) =>
+        listener(maximized);
+      ipcRenderer.on(IPC_CHANNELS.windowMaximizedChanged, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.windowMaximizedChanged, handler);
+    },
+    toggleMaximize: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.windowToggleMaximize),
     updateState: (changes: Partial<WindowState>): Promise<WindowState> =>
       ipcRenderer.invoke(IPC_CHANNELS.windowUpdateState, changes),
   }),

@@ -35,7 +35,9 @@ function createMainWindow(): BrowserWindow {
   const bounds = visibleBounds(windowState);
   const mainWindow = new BrowserWindow({
     ...bounds,
+    autoHideMenuBar: true,
     backgroundColor: '#101114',
+    frame: false,
     icon: appIconPath(),
     minHeight: Math.min(640, bounds.height),
     minWidth: Math.min(1040, bounds.width),
@@ -48,6 +50,7 @@ function createMainWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
 
   if (windowState?.maximized === true) {
     mainWindow.maximize();
@@ -90,8 +93,14 @@ function createMainWindow(): BrowserWindow {
   };
   mainWindow.on('resize', saveWindow);
   mainWindow.on('move', saveWindow);
-  mainWindow.on('maximize', saveWindow);
-  mainWindow.on('unmaximize', saveWindow);
+  const maximizedChanged = (): void => {
+    if (!mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.windowMaximizedChanged, mainWindow.isMaximized());
+    }
+    saveWindow();
+  };
+  mainWindow.on('maximize', maximizedChanged);
+  mainWindow.on('unmaximize', maximizedChanged);
 
   return mainWindow;
 }
